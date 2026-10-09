@@ -9,6 +9,25 @@ const money = (n) => 'N$' + Number(n || 0).toLocaleString('en-US', { minimumFrac
 const money0 = (n) => 'N$' + Math.round(Number(n || 0)).toLocaleString('en-US');
 const uid = () => Math.random().toString(36).slice(2, 10);
 const view = $('#view');
+
+// <dialog> arrived in WebKit 15.4; older macOS WebKit gets a small stand-in with the same API.
+(function dialogFallback() {
+  if (typeof HTMLDialogElement === 'function' && typeof HTMLDialogElement.prototype.showModal === 'function') return;
+  document.documentElement.classList.add('no-dialog');
+  $$('dialog').forEach((d) => {
+    d.showModal = d.show = () => { d.setAttribute('open', ''); document.body.classList.add('dlg-open'); };
+    d.close = () => {
+      d.removeAttribute('open');
+      if (!$$('dialog[open]').length) document.body.classList.remove('dlg-open');
+      d.dispatchEvent(new Event('close'));
+    };
+    Object.defineProperty(d, 'open', { get: () => d.hasAttribute('open'), configurable: true });
+    d.addEventListener('submit', (e) => {
+      if ((e.target.getAttribute('method') || '').toLowerCase() === 'dialog') { e.preventDefault(); d.close(); }
+    });
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') $$('dialog[open]').forEach((d) => d.close()); });
+})();
 const PRIOS = [['must', '⭐ Must have'], ['high', 'High'], ['medium', 'Medium'], ['low', 'Nice to have']];
 
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }

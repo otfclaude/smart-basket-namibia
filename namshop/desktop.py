@@ -14,10 +14,13 @@ Environment:
 """
 from __future__ import annotations
 
+import faulthandler
 import json
 import logging
 import os
+import secrets
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -27,7 +30,9 @@ import webbrowser
 from pathlib import Path
 
 APP_NAME = "Smart Basket Namibia"
-PORT = 47826  # fixed so the window keeps its storage between launches; another free port if taken
+# The window's saved cart and sign-in belong to its exact address, so the port must stay the same
+# from launch to launch. Each macOS user gets their own port; the one in use is remembered.
+BASE_PORT = 47826 + (os.getuid() % 500 if hasattr(os, "getuid") else 0)
 
 
 def app_data_dir() -> Path:
@@ -44,11 +49,17 @@ def app_data_dir() -> Path:
 def _setup(data: Path):
     os.environ.setdefault("NAMSHOP_DATA", str(data))
     os.environ["NAMSHOP_LOCAL"] = "1"            # single-person app: see server.py "local mode"
+    os.environ["NAMSHOP_INSTANCE"] = _instance_id(data)
     log = open(data / "app.log", "a", buffering=1, encoding="utf-8")
-    if sys.stdout is None or sys.stderr is None:  # windowed builds have no console
+    if getattr(sys, "frozen", False) and not os.environ.get("NAMSHOP_NO_WINDOW"):
+        sys.stdout = sys.stderr = log             # a Finder launch has nowhere else to write
+    elif sys.stdout is None or sys.stderr is None:
         sys.stdout = sys.stdout or log
         sys.stderr = sys.stderr or log
+    faulthandler.enable(log)
     logging.basicConfig(stream=log, level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+    sys.excepthook = lambda *exc: logging.error("uncaught error", exc_info=exc)
+    threading.excepthook = lambda a: logging.error("error in thread %s", a.thread, exc_info=(a.exc_type, a.exc_value, a.exc_traceback))
     # GUI apps on macOS don't inherit the shell's proxy/CA settings; certifi gives Python a CA bundle
     try:
         import certifi
@@ -57,13 +68,55 @@ def _setup(data: Path):
         pass
 
 
+def _instance_id(data: Path) -> str:
+    """A random id for this user's app, so we only ever reuse our own running server."""
+    path = data / "instance"
+    try:
+        return path.read_text().strip() or _new_instance(path)
+    except OSError:
+        return _new_instance(path)
+
+
+def _new_instance(path: Path) -> str:
+    token = secrets.token_hex(12)
+    try:
+        path.write_text(token)
+    except OSError:
+        pass
+    return token
+
+
 def _port_free(port: int) -> bool:
     with socket.socket() as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)   # same as uvicorn: ignore TIME_WAIT
         try:
             s.bind(("127.0.0.1", port))
             return True
         except OSError:
             return False
+
+
+def _choose_port(data: Path) -> tuple[int, bool]:
+    """(port, reuse): the remembered port if possible, else this user's usual one, else the next free.
+
+    reuse=True means our own server is already running there (e.g. started from the command line).
+    """
+    saved = None
+    try:
+        saved = int((data / "port").read_text().strip())
+    except (OSError, ValueError):
+        pass
+    candidates = ([saved] if saved else []) + [BASE_PORT + i for i in range(30)]
+    for port in dict.fromkeys(candidates):
+        if _is_ours(port):
+            return port, True
+        if _port_free(port):
+            try:
+                (data / "port").write_text(str(port))
+            except OSError:
+                pass
+            return port, False
+    return _free_port(), False
 
 
 def _free_port() -> int:
@@ -80,7 +133,9 @@ def _get(url: str, timeout: float = 5):
 def _is_ours(port: int) -> bool:
     try:
         status, _, body = _get(f"http://127.0.0.1:{port}/healthz", 2)
-        return status == 200 and json.loads(body).get("app") == "smart-basket"
+        info = json.loads(body)
+        return status == 200 and info.get("app") == "smart-basket" and \
+            info.get("instance") == os.environ.get("NAMSHOP_INSTANCE")
     except Exception:
         return False
 
@@ -162,19 +217,36 @@ def selftest() -> int:
             server.should_exit = True
 
 
+def _alert(title: str, message: str):
+    """Tell the person something went wrong, even though the window never opened."""
+    try:
+        if sys.platform == "darwin":
+            script = f'display alert {json.dumps(title)} message {json.dumps(message)} as critical'
+            subprocess.run(["osascript", "-e", script], timeout=120, check=False)
+        else:
+            print(f"{title}: {message}", file=sys.stderr)
+    except Exception:
+        pass
+
+
 def main():
     data = app_data_dir()
     _setup(data)
     if "--selftest" in sys.argv:
         sys.exit(selftest())
+    try:
+        run(data)
+    except Exception:
+        logging.exception("Smart Basket Namibia couldn't start")
+        _alert(f"{APP_NAME} couldn't start",
+               f"The details are in {data / 'app.log'}. Try opening the app again; if it keeps happening, "
+               "send that file to whoever gave you the app.")
+        sys.exit(1)
 
-    port, reuse = PORT, False
+
+def run(data: Path):
+    port, reuse = _choose_port(data)
     server = thread = None
-    if not _port_free(port):
-        if _is_ours(port):
-            reuse = True          # already running (e.g. started from the command line): just open a window
-        else:
-            port = _free_port()
     if not reuse:
         server, thread = start_server(port)
     url = f"http://127.0.0.1:{port}/"
@@ -201,7 +273,8 @@ def main():
         return
     webview.create_window(APP_NAME, url, width=1320, height=880, min_size=(380, 560),
                           background_color="#F4F6FB", text_select=True)
-    # private_mode=False keeps the cart, sign-in and settings between launches
+    # private_mode=False keeps the cart and sign-in between launches. On macOS WebKit keeps them in
+    # ~/Library/WebKit/<bundle id> (storage_path is used by the other platforms' backends).
     webview.start(private_mode=False, storage_path=str(data / "webview"))
     # Window closed: stop serving and quit now, even if a pamphlet refresh is still downloading
     # (its worker threads would otherwise keep the process alive until they finish).

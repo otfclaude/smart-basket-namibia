@@ -25,14 +25,16 @@ jobs:
           - arch: arm64         # Apple chip (M1 and later)
             python_arch: arm64
             py: python
+            numpy_platform: macosx_11_0_arm64
             label: AppleSilicon
           # Intel Macs: the runner is an Apple chip, and setup-python's "x64" Python is a universal
           # build, so every Python command runs as x86_64 under Rosetta via `arch -x86_64`.
           - arch: x86_64
             python_arch: x64
             py: arch -x86_64 python
+            numpy_platform: macosx_10_13_x86_64
             label: Intel
-    runs-on: macos-14
+    runs-on: macos-15         # macos-14 images are retired in November 2026
     timeout-minutes: 45
     env:
       APP: Smart Basket Namibia
@@ -54,6 +56,13 @@ jobs:
         run: |
           ${{ matrix.py }} -m pip install --upgrade pip
           ${{ matrix.py }} -m pip install -r namshop/requirements.txt -r namshop/packaging/requirements-build.txt
+          # pip picks numpy's newest-macOS wheel (Accelerate, macOS 14+). Ship the build of the same
+          # version that runs on the app's minimum macOS instead.
+          NPV=$(${{ matrix.py }} -c 'import numpy; print(numpy.__version__)')
+          PYV=$(${{ matrix.py }} -c 'import sys; print("%d.%d" % sys.version_info[:2])')
+          ${{ matrix.py }} -m pip download --no-deps --only-binary=:all: --python-version "$PYV" \
+            --platform ${{ matrix.numpy_platform }} "numpy==$NPV" -d "$RUNNER_TEMP/np"
+          ${{ matrix.py }} -m pip install --no-deps --force-reinstall "$RUNNER_TEMP"/np/numpy-*.whl
       - name: Unit tests
         run: ${{ matrix.py }} -m pytest namshop/tests -q
       - name: Build the app
@@ -62,6 +71,8 @@ jobs:
         run: |
           file "dist/$APP.app/Contents/MacOS/$APP"
           file "dist/$APP.app/Contents/MacOS/$APP" | grep -q "${{ matrix.arch }}"
+      - name: Check every binary runs on the app's minimum macOS
+        run: python namshop/packaging/check_min_macos.py "dist/$APP.app"
       - name: Self-test the packaged app
         run: |
           NAMSHOP_SELFTEST_OUT="$RUNNER_TEMP/selftest.txt" "dist/$APP.app/Contents/MacOS/$APP" --selftest \
@@ -75,7 +86,9 @@ jobs:
           mkdir -p dmg
           cp -R "dist/$APP.app" dmg/
           ln -s /Applications dmg/Applications
-          hdiutil create -volname "$APP" -srcfolder dmg -ov -format UDZO "$DMG"
+          # hdiutil sometimes fails with "Resource busy" on hosted runners: retry
+          for i in 1 2 3; do hdiutil create -volname "$APP" -srcfolder dmg -ov -format UDZO "$DMG" && break; sleep 10; done
+          test -f "$DMG"
           hdiutil verify "$DMG"
           shasum -a 256 "$DMG"
           du -h "$DMG"
@@ -84,7 +97,7 @@ jobs:
           hdiutil attach -nobrowse -mountpoint /tmp/sbmnt "$DMG"
           rm -rf "/Applications/$APP.app"
           cp -R "/tmp/sbmnt/$APP.app" /Applications/
-          hdiutil detach /tmp/sbmnt
+          hdiutil detach /tmp/sbmnt || { sleep 5; hdiutil detach -force /tmp/sbmnt; }
           codesign --verify --deep --strict "/Applications/$APP.app"
           NAMSHOP_SELFTEST_OUT="$RUNNER_TEMP/selftest2.txt" "/Applications/$APP.app/Contents/MacOS/$APP" --selftest \
             || { cat "$RUNNER_TEMP/selftest2.txt"; exit 1; }
@@ -115,6 +128,12 @@ jobs:
           merge-multiple: true
       - name: Check something was built
         run: ls -la *.dmg
+      - name: Point the release tag at this build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api -X PATCH "repos/${{ github.repository }}/git/refs/tags/smart-basket-mac" \
+            -f sha="${{ github.sha }}" -F force=true || echo "No tag yet: the release step creates it."
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: smart-basket-mac
@@ -128,16 +147,19 @@ jobs:
             **Smart-Basket-Namibia-Mac-Intel.dmg**.
 
             1. Open the .dmg and drag **Smart Basket Namibia** onto **Applications**.
-            2. Open it from Applications. The first time, macOS says it can't check the app for malicious
-               software, because the app isn't registered with Apple. Click **Done**, then open
-               **System Settings → Privacy & Security**, scroll down and click **Open Anyway** next to
-               "Smart Basket Namibia", and confirm. You only do this once.
+            2. Open it from Applications. The first time, macOS won't open it because the app isn't
+               registered with Apple. Close the message (**Done** on macOS 15, **OK** or **Cancel** on
+               earlier versions), then open **System Settings → Privacy & Security**, scroll down, click
+               **Open Anyway** next to "Smart Basket Namibia" and confirm. You only do this once.
+               On macOS 14 and earlier you can instead Control-click the app and choose **Open**.
                (Or in Terminal: `xattr -dr com.apple.quarantine "/Applications/Smart Basket Namibia.app"`.)
             3. Tap **Refresh** to fetch this week's pamphlets. To have prices read from them automatically,
                tap **🤖 Connect Claude** and paste an Anthropic API key.
 
-            Your cart, lists and settings are kept in `~/Library/Application Support/Smart Basket Namibia`.
-            Requires macOS 11 or later. Built from ${{ github.sha }}.
+            Your lists, pamphlets, settings and Claude key are kept in
+            `~/Library/Application Support/Smart Basket Namibia`. The cart and sign-in are kept by the
+            app's window. Updating the app keeps all of them.
+            Requires macOS 11.3 or later (tested on macOS 15). Built from ${{ github.sha }}.
           fail_on_unmatched_files: false
           files: |
             Smart-Basket-Namibia-Mac-AppleSilicon.dmg

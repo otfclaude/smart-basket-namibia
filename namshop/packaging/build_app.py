@@ -65,7 +65,7 @@ def main():
             "CFBundleShortVersionString": version(),
             "CFBundleVersion": version(),
             "LSApplicationCategoryType": "public.app-category.shopping",
-            "LSMinimumSystemVersion": "11.0",
+            "LSMinimumSystemVersion": "11.3",            # pywebview's Cocoa backend needs 11.3 APIs
             "NSHighResolutionCapable": True,
             "NSRequiresAquaSystemAppearance": False,      # follow the system's dark mode
             "NSHumanReadableCopyright": "Smart Basket Namibia. Shop names and logos belong to their owners.",

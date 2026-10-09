@@ -29,18 +29,24 @@ To check which you have: Apple menu → **About This Mac**. "Chip: Apple M…" m
 
 1. Open the `.dmg` and drag **Smart Basket Namibia** onto **Applications**.
 2. Open it from Applications. The app isn't registered with Apple, so the first time macOS
-   refuses to open it. Click **Done**, then go to **System Settings → Privacy & Security**, scroll
-   down, click **Open Anyway** next to "Smart Basket Namibia" and confirm. This is needed only once.
+   won't open it. Close the message (**Done** on macOS 15, **OK** or **Cancel** on earlier
+   versions), then go to **System Settings → Privacy & Security**, scroll down, click
+   **Open Anyway** next to "Smart Basket Namibia" and confirm. This is needed only once.
+   On macOS 14 and earlier you can instead Control-click the app and choose **Open**.
    Or, in Terminal: `xattr -dr com.apple.quarantine "/Applications/Smart Basket Namibia.app"`.
 3. The app opens in its own window. Tap **Refresh** for this week's pamphlets. To have prices read
    from them automatically, tap **🤖 Connect Claude** and paste an Anthropic API key. The key is
    stored only on your Mac.
 
-The app runs entirely on your Mac and is reachable only from it. The first account you create in it
-becomes its admin. Your cart, lists, pamphlets and settings live in
-`~/Library/Application Support/Smart Basket Namibia`. To update, download the newest `.dmg` and
-replace the app; your data is kept. The app is built and tested by `.github/workflows/namshop-mac.yml`
-(`namshop/desktop.py` is the launcher, `namshop/packaging/build_app.py` the PyInstaller build).
+Requires macOS 11.3 (Big Sur) or later; each build is tested on macOS 15. The app runs entirely on
+your Mac and is reachable only from it. The first account you create in it becomes its admin.
+Your lists, pamphlets, settings and Claude key live in
+`~/Library/Application Support/Smart Basket Namibia` (plus `app.log`, which helps if something goes wrong).
+The cart and sign-in are kept by the app's window, in macOS's WebKit storage for the app. To
+update, download the newest `.dmg` and replace the app; all of it is kept.
+The app is built and tested by `.github/workflows/namshop-mac.yml`
+(`namshop/desktop.py` is the launcher, `namshop/packaging/build_app.py` the PyInstaller build,
+`namshop/packaging/check_min_macos.py` checks that every bundled library runs on macOS 11.3).
 To build it yourself on a Mac:
 `pip install -r namshop/requirements.txt -r namshop/packaging/requirements-build.txt && python namshop/packaging/build_app.py`.
 

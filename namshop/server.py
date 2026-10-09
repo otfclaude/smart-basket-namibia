@@ -129,18 +129,17 @@ def create_app(db_file: str | Path | None = None, refresh_hours: float | None = 
         task = None
         if hours > 0:
             async def loop():
+                # Check the wall clock every few minutes rather than sleeping for hours, so a laptop
+                # that slept through the due time refreshes soon after it wakes.
                 while True:
                     c = db.connect(db_file)
                     try:
                         last = json.loads(db.get_setting(c, "last_refresh", "{}") or "{}").get("at", "")
                     finally:
                         c.close()
-                    age = (time.time() - _ts(last)) if last else 1e9
-                    if age >= hours * 3600:
+                    if not last or time.time() - _ts(last) >= hours * 3600:
                         refresher.start(force=True)
-                        await asyncio.sleep(hours * 3600)
-                    else:
-                        await asyncio.sleep(hours * 3600 - age)
+                    await asyncio.sleep(min(600, hours * 3600))
             task = asyncio.create_task(loop())
         yield
         if task:
@@ -149,9 +148,10 @@ def create_app(db_file: str | Path | None = None, refresh_hours: float | None = 
     app = FastAPI(title="Smart Basket Namibia", version=__version__, lifespan=lifespan,
                   docs_url="/api/docs", redoc_url=None, openapi_url="/api/openapi.json")
     local = local_mode()
+    instance = os.environ.get("NAMSHOP_INSTANCE", "")   # the desktop launcher's id for this server
     if local:  # desktop app: only answer requests addressed to this computer (blocks DNS rebinding)
         from starlette.middleware.trustedhost import TrustedHostMiddleware
-        app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "testserver"])
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
     app.state.db_file = db_file
     app.state.refresher = refresher
     baskets_cache: dict = {}
@@ -463,7 +463,8 @@ def create_app(db_file: str | Path | None = None, refresh_hours: float | None = 
 
     @app.get("/healthz")
     def health():
-        return {"ok": True, "app": "smart-basket", "version": __version__}
+        return {"ok": True, "app": "smart-basket", "version": __version__,
+                "instance": instance}
 
     return app
 

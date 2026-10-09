@@ -278,9 +278,11 @@ def test_local_desktop_mode(tmp_path, monkeypatch):
     monkeypatch.setenv("NAMSHOP_LOCAL", "1")
     monkeypatch.setattr(leaflets, "_key_file", lambda: tmp_path / "anthropic_api_key")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("NAMSHOP_INSTANCE", "abc123")
     with TestClient(create_app(tmp_path / "local.db", refresh_hours=0), base_url="http://127.0.0.1:47826") as c:
         assert c.get("/api/meta").json()["local"] is True
-        assert c.get("/healthz").json()["app"] == "smart-basket"
+        assert c.get("/healthz").json() | {"version": None} == {"ok": True, "app": "smart-basket", "version": None,
+                                                                 "instance": "abc123"}
         first = c.post("/api/auth/register", json={"name": "Owner", "email": "o@example.com", "password": "secret123"}).json()
         assert first["is_admin"] is True                      # the Mac's owner manages the app
         c.post("/api/auth/logout")
