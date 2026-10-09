@@ -148,6 +148,10 @@ def create_app(db_file: str | Path | None = None, refresh_hours: float | None = 
 
     app = FastAPI(title="Smart Basket Namibia", version=__version__, lifespan=lifespan,
                   docs_url="/api/docs", redoc_url=None, openapi_url="/api/openapi.json")
+    local = local_mode()
+    if local:  # desktop app: only answer requests addressed to this computer (blocks DNS rebinding)
+        from starlette.middleware.trustedhost import TrustedHostMiddleware
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "testserver"])
     app.state.db_file = db_file
     app.state.refresher = refresher
     baskets_cache: dict = {}
@@ -189,7 +193,7 @@ def create_app(db_file: str | Path | None = None, refresh_hours: float | None = 
                 "refreshing": refresher.status()["running"],
                 "logo_version": zlib.crc32((db.get_setting(conn, "logo_version", "") or "").encode()),
                 "sample_data": sample.enabled(conn) and counts.get("sample", 0) > 0, "price_counts": counts,
-                "user": auth.public_user(user), "version": __version__}
+                "user": auth.public_user(user), "version": __version__, "local": local}
 
     @app.post("/api/auth/register")
     def register(body: RegisterIn, request: Request, response: Response, conn: Conn):
@@ -197,6 +201,9 @@ def create_app(db_file: str | Path | None = None, refresh_hours: float | None = 
             user = auth.register(conn, body.name, body.email, body.password, body.town)
         except auth.AuthError as e:
             raise HTTPException(400, str(e))
+        if local and conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 1:
+            auth.make_admin(conn, user["email"])   # the desktop app's owner manages it
+            user["is_admin"] = True
         set_cookie(request, response, auth.new_session(conn, user["id"]))
         return user
 
@@ -416,7 +423,10 @@ def create_app(db_file: str | Path | None = None, refresh_hours: float | None = 
         return {"results": importer.refresh_feeds(conn)}
 
     @app.post("/api/admin/claude-key")
-    def admin_claude_key(body: KeyIn, user=Depends(require_admin)):
+    def admin_claude_key(body: KeyIn, user=Depends(current_user)):
+        # On the desktop app whoever sits at this computer may connect Claude; on a server, admins only.
+        if not local and not (user and user["is_admin"]):
+            raise HTTPException(401 if user is None else 403, "Admins only.")
         leaflets.save_api_key(body.key)
         return {"claude": leaflets.claude_configured()}
 
@@ -453,9 +463,14 @@ def create_app(db_file: str | Path | None = None, refresh_hours: float | None = 
 
     @app.get("/healthz")
     def health():
-        return {"ok": True}
+        return {"ok": True, "app": "smart-basket", "version": __version__}
 
     return app
+
+
+def local_mode() -> bool:
+    """True for the desktop app: one person, server bound to 127.0.0.1 only."""
+    return os.environ.get("NAMSHOP_LOCAL") == "1"
 
 
 def _ts(iso: str) -> float:

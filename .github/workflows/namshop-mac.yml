@@ -1,0 +1,137 @@
+name: Smart Basket Mac app
+
+# Builds "Smart Basket Namibia.app" for Apple-chip and Intel Macs, tests each packaged app
+# (self-test, install from the disk image, headless launch), then publishes both .dmg files
+# to the "smart-basket-mac" release.
+on:
+  push:
+    branches: ["claude/amazing-mccarthy-sz8fya", "main"]
+    paths: ["namshop/**", ".github/workflows/namshop-mac.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: namshop-mac-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64         # Apple chip (M1 and later)
+            python_arch: arm64
+            label: AppleSilicon
+          - arch: x86_64        # Intel Macs: x64 Python under Rosetta on the Apple-chip runner
+            python_arch: x64
+            label: Intel
+    runs-on: macos-14
+    timeout-minutes: 45
+    env:
+      APP: Smart Basket Namibia
+      DMG: Smart-Basket-Namibia-Mac-${{ matrix.label }}.dmg
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          architecture: ${{ matrix.python_arch }}
+      - name: Check Python architecture
+        run: |
+          python -c "import platform, sys; print(platform.machine(), sys.version)"
+          test "$(python -c 'import platform; print(platform.machine())')" = "${{ matrix.arch }}"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r namshop/requirements.txt -r namshop/packaging/requirements-build.txt
+      - name: Unit tests
+        run: python -m pytest namshop/tests -q
+      - name: Build the app
+        run: python namshop/packaging/build_app.py
+      - name: Check the app's architecture
+        run: |
+          file "dist/$APP.app/Contents/MacOS/$APP"
+          file "dist/$APP.app/Contents/MacOS/$APP" | grep -q "${{ matrix.arch }}"
+      - name: Self-test the packaged app
+        run: |
+          NAMSHOP_SELFTEST_OUT="$RUNNER_TEMP/selftest.txt" "dist/$APP.app/Contents/MacOS/$APP" --selftest \
+            || { cat "$RUNNER_TEMP/selftest.txt"; exit 1; }
+          cat "$RUNNER_TEMP/selftest.txt"
+          grep -q "^SELFTEST OK" "$RUNNER_TEMP/selftest.txt"
+      - name: Sign (ad hoc) and build the disk image
+        run: |
+          codesign --force --deep --sign - "dist/$APP.app"
+          codesign --verify --deep --strict --verbose=2 "dist/$APP.app"
+          mkdir -p dmg
+          cp -R "dist/$APP.app" dmg/
+          ln -s /Applications dmg/Applications
+          hdiutil create -volname "$APP" -srcfolder dmg -ov -format UDZO "$DMG"
+          hdiutil verify "$DMG"
+          shasum -a 256 "$DMG"
+          du -h "$DMG"
+      - name: Install from the disk image like a user, then run it
+        run: |
+          hdiutil attach -nobrowse -mountpoint /tmp/sbmnt "$DMG"
+          rm -rf "/Applications/$APP.app"
+          cp -R "/tmp/sbmnt/$APP.app" /Applications/
+          hdiutil detach /tmp/sbmnt
+          codesign --verify --deep --strict "/Applications/$APP.app"
+          NAMSHOP_SELFTEST_OUT="$RUNNER_TEMP/selftest2.txt" "/Applications/$APP.app/Contents/MacOS/$APP" --selftest \
+            || { cat "$RUNNER_TEMP/selftest2.txt"; exit 1; }
+          # the real launch path, without a window: the app must serve its pages
+          NAMSHOP_NO_WINDOW=1 NAMSHOP_REFRESH_HOURS=0 "/Applications/$APP.app/Contents/MacOS/$APP" > launch.txt 2>&1 &
+          for i in $(seq 1 60); do grep -q "^http" launch.txt && break; sleep 2; done
+          cat launch.txt
+          URL=$(grep -m1 "^http" launch.txt)
+          test -n "$URL"
+          curl -fsS "${URL}healthz"; echo
+          curl -fsS "$URL" | grep -q "Smart Basket"
+          curl -fsS "${URL}api/meta" | python -c "import json, sys; d = json.load(sys.stdin); assert d['local'] and len(d['stores']) >= 10; print('meta ok')"
+          pkill -f "$APP.app/Contents/MacOS/$APP" || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.DMG }}
+          path: ${{ env.DMG }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    # Publish whichever Mac builds passed, so one stuck runner doesn't hold back the other.
+    if: ${{ always() && !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: Check something was built
+        run: ls -la *.dmg
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: smart-basket-mac
+          name: Smart Basket Namibia — Mac app
+          target_commitish: ${{ github.sha }}
+          prerelease: false
+          make_latest: false
+          body: |
+            **Which file?** Apple menu → About This Mac. If it says *Chip: Apple M…*, download
+            **Smart-Basket-Namibia-Mac-AppleSilicon.dmg**. If it says *Processor: Intel*, download
+            **Smart-Basket-Namibia-Mac-Intel.dmg**.
+
+            1. Open the .dmg and drag **Smart Basket Namibia** onto **Applications**.
+            2. Open it from Applications. The first time, macOS says it can't check the app for malicious
+               software, because the app isn't registered with Apple. Click **Done**, then open
+               **System Settings → Privacy & Security**, scroll down and click **Open Anyway** next to
+               "Smart Basket Namibia", and confirm. You only do this once.
+               (Or in Terminal: `xattr -dr com.apple.quarantine "/Applications/Smart Basket Namibia.app"`.)
+            3. Tap **Refresh** to fetch this week's pamphlets. To have prices read from them automatically,
+               tap **🤖 Connect Claude** and paste an Anthropic API key.
+
+            Your cart, lists and settings are kept in `~/Library/Application Support/Smart Basket Namibia`.
+            Requires macOS 11 or later. Built from ${{ github.sha }}.
+          fail_on_unmatched_files: false
+          files: |
+            Smart-Basket-Namibia-Mac-AppleSilicon.dmg
+            Smart-Basket-Namibia-Mac-Intel.dmg

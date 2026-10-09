@@ -77,6 +77,20 @@
   <div id="report-body"></div>
 </dialog>
 
+<dialog id="claude-dialog" aria-labelledby="claude-title">
+  <form method="dialog" class="dialog-close"><button aria-label="Close">✕</button></form>
+  <h2 id="claude-title">🤖 Read pamphlets with Claude</h2>
+  <p class="muted">With an Anthropic API key, every pamphlet the Refresh button finds is read automatically:
+    products, prices and dates become specials. Get a key at
+    <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>.
+    It's stored only on this computer.</p>
+  <form id="claude-form" novalidate>
+    <label>Anthropic API key<input name="key" type="password" autocomplete="off" placeholder="sk-ant-…" required minlength="20"></label>
+    <p class="form-error" id="claude-error" role="alert"></p>
+    <button class="btn primary wide big" type="submit">Connect Claude</button>
+  </form>
+</dialog>
+
 <datalist id="towns">
   <option>Windhoek</option><option>Swakopmund</option><option>Walvis Bay</option><option>Oshakati</option>
   <option>Ongwediva</option><option>Ondangwa</option><option>Rundu</option><option>Katima Mulilo</option>

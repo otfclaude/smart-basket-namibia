@@ -268,3 +268,42 @@ def test_api_pamphlets_refresh_and_baskets(client, monkeypatch):
     meta = client.get("/api/meta").json()
     assert meta["claude"] in (True, False) and "logo_version" in meta
     assert [s["id"] for s in meta["stores"]].count("model") == 1 and "picknpay" not in [s["id"] for s in meta["stores"]]
+
+
+def test_local_desktop_mode(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from namshop import leaflets
+    from namshop.server import create_app
+    monkeypatch.setenv("NAMSHOP_LOCAL", "1")
+    monkeypatch.setattr(leaflets, "_key_file", lambda: tmp_path / "anthropic_api_key")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    with TestClient(create_app(tmp_path / "local.db", refresh_hours=0), base_url="http://127.0.0.1:47826") as c:
+        assert c.get("/api/meta").json()["local"] is True
+        assert c.get("/healthz").json()["app"] == "smart-basket"
+        first = c.post("/api/auth/register", json={"name": "Owner", "email": "o@example.com", "password": "secret123"}).json()
+        assert first["is_admin"] is True                      # the Mac's owner manages the app
+        c.post("/api/auth/logout")
+        second = c.post("/api/auth/register", json={"name": "Kid", "email": "k@example.com", "password": "secret123"}).json()
+        assert second["is_admin"] is False
+        c.post("/api/auth/logout")
+        assert c.post("/api/admin/claude-key", json={"key": "sk-ant-" + "x" * 30}).json()["claude"] is True
+        assert c.get("/api/meta", headers={"host": "attacker.example"}).status_code == 400   # DNS rebinding
+
+
+def test_server_mode_claude_key_needs_admin(client):
+    assert client.post("/api/admin/claude-key", json={"key": "sk-ant-" + "x" * 30}).status_code == 401
+    client.post("/api/auth/register", json={"name": "A", "email": "a2@example.com", "password": "secret123"})
+    assert client.post("/api/admin/claude-key", json={"key": "sk-ant-" + "x" * 30}).status_code == 403
+    assert client.get("/api/meta").json()["local"] is False
+
+
+def test_desktop_selftest_serves_the_real_app(tmp_path, monkeypatch):
+    from namshop import desktop
+    monkeypatch.setenv("NAMSHOP_LOCAL", "1")
+    monkeypatch.setenv("NAMSHOP_DATA", str(tmp_path / "unused"))
+    monkeypatch.setenv("NAMSHOP_SELFTEST_OUT", str(tmp_path / "selftest.txt"))
+    monkeypatch.setenv("NAMSHOP_PBKDF2_ITERATIONS", "1000")
+    assert desktop.selftest() == 0, (tmp_path / "selftest.txt").read_text()
+    report = (tmp_path / "selftest.txt").read_text()
+    assert report.startswith("SELFTEST OK") and "budget cart" in report and "anthropic" in report

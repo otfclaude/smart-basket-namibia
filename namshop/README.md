@@ -16,6 +16,34 @@ More screenshots: [one-tap baskets](previews/deals-baskets.png), [budget cart](p
 [price comparison](previews/compare.png), [refresh progress](previews/refresh.png),
 [cart on a phone](previews/mobile-cart.png). They show the built-in sample prices.
 
+## Download for Mac
+
+Get **Smart Basket Namibia** from the repository's **Releases** page, release **Smart Basket Namibia — Mac app**
+(tag `smart-basket-mac`):
+
+* **Apple chip (M1 and later)**: `Smart-Basket-Namibia-Mac-AppleSilicon.dmg`
+* **Intel Mac**: `Smart-Basket-Namibia-Mac-Intel.dmg`
+
+To check which you have: Apple menu → **About This Mac**. "Chip: Apple M…" means Apple chip;
+"Processor: …Intel…" means Intel.
+
+1. Open the `.dmg` and drag **Smart Basket Namibia** onto **Applications**.
+2. Open it from Applications. The app isn't registered with Apple, so the first time macOS
+   refuses to open it. Click **Done**, then go to **System Settings → Privacy & Security**, scroll
+   down, click **Open Anyway** next to "Smart Basket Namibia" and confirm. This is needed only once.
+   Or, in Terminal: `xattr -dr com.apple.quarantine "/Applications/Smart Basket Namibia.app"`.
+3. The app opens in its own window. Tap **Refresh** for this week's pamphlets. To have prices read
+   from them automatically, tap **🤖 Connect Claude** and paste an Anthropic API key. The key is
+   stored only on your Mac.
+
+The app runs entirely on your Mac and is reachable only from it. The first account you create in it
+becomes its admin. Your cart, lists, pamphlets and settings live in
+`~/Library/Application Support/Smart Basket Namibia`. To update, download the newest `.dmg` and
+replace the app; your data is kept. The app is built and tested by `.github/workflows/namshop-mac.yml`
+(`namshop/desktop.py` is the launcher, `namshop/packaging/build_app.py` the PyInstaller build).
+To build it yourself on a Mac:
+`pip install -r namshop/requirements.txt -r namshop/packaging/requirements-build.txt && python namshop/packaging/build_app.py`.
+
 ## What it does
 
 | Page | What you can do |

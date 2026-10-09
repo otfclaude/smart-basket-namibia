@@ -440,8 +440,9 @@ async function renderPamphlets() {
   d.leaflets.forEach((l) => { if (!latest[l.store_id]) latest[l.store_id] = l; });
   S.pamphlets = latest;
   if (!d.claude) {
-    $('#pm-note').innerHTML = `<div class="callout info">📖 Pamphlets are saved here so you can flip through them. Prices are read from them automatically
-      once Claude is connected (an admin adds the key on the <a href="#/me">Me</a> page).</div>`;
+    $('#pm-note').innerHTML = `<div class="callout info row between"><span>📖 Pamphlets are saved here so you can flip through them. Prices are read from them
+      automatically once Claude is connected${S.meta.local ? '.' : ' (an admin adds the key on the <a href="#/me">Me</a> page).'}</span>
+      ${S.meta.local ? '<button class="btn primary small" type="button" data-claude>🤖 Connect Claude</button>' : ''}</div>`;
   }
   const stores = S.meta.stores;
   $('#pm').innerHTML = stores.map((s) => {
@@ -518,7 +519,8 @@ function showRefresh(s) {
     ${shops.map(([id, x]) => `<div class="rs-shop" data-rs="${h(id)}">${logo(id, 'sm')}<div><b style="font-size:.88rem">${h(x.name || storeName(id))}</b>
       <div class="rs-msg">${h(x.message || '')}</div></div>
       <span class="rs-icon ${['searching', 'downloading', 'reading'].includes(x.state) ? 'busy' : ''}">${RS_ICON[x.state] || ''}</span></div>`).join('')}
-    ${s.claude ? '' : '<p class="rs-msg" style="margin-top:8px">ℹ️ Pamphlets are saved to flip through. Prices are read automatically once Claude is connected.</p>'}`;
+    ${s.claude ? '' : `<p class="rs-msg" style="margin-top:8px">ℹ️ Pamphlets are saved to flip through. Prices are read automatically once Claude is connected.
+      ${S.meta.local ? '<button class="btn small primary" type="button" data-claude style="margin-top:6px">🤖 Connect Claude</button>' : ''}</p>`}`;
   $('#rs-close').onclick = hideSheet;
   if (firstOpen) animate(sheet, { opacity: [0, 1], transform: ['translateY(30px) scale(.96)', 'translateY(0px) scale(1)'] }, { duration: 0.4, ease: EASE });
   shops.forEach(([id, x]) => { if (R.prev[id] && R.prev[id] !== x.state && ['done', 'none', 'error'].includes(x.state)) pop($(`[data-rs="${id}"] .rs-icon`, sheet)); });
@@ -1265,6 +1267,27 @@ async function renderAdmin(box) {
   };
 }
 
+// ------------------------------------------------------------------ connect Claude (desktop app)
+function openClaude() {
+  $('#claude-error').textContent = '';
+  $('#claude-dialog').showModal();
+  $('#claude-form [name=key]').focus();
+}
+$('#claude-form').onsubmit = async (e) => {
+  e.preventDefault();
+  const key = new FormData(e.target).get('key').trim();
+  if (key.length < 20) { $('#claude-error').textContent = 'Paste the whole key. It starts with sk-ant-.'; return; }
+  try {
+    await api('/api/admin/claude-key', { body: { key } });
+    e.target.reset();
+    $('#claude-dialog').close();
+    await loadMeta();
+    confetti();
+    toast('🤖 Claude connected. Tap Refresh to read this week\'s pamphlets.');
+    if (S.view === 'pamphlets') route();
+  } catch (x) { $('#claude-error').textContent = x.message; }
+};
+
 // ------------------------------------------------------------------ auth dialog
 let authMode = 'login';
 function openAuth(mode = 'login', why) {
@@ -1312,6 +1335,7 @@ document.addEventListener('click', (e) => {
   if (e.target.closest('[data-signin]')) openAuth('login');
   if (e.target.closest('[data-register]')) openAuth('register');
   if (e.target.closest('[data-refresh]') || e.target.closest('#refresh-btn')) startRefresh();
+  if (e.target.closest('[data-claude]')) openClaude();
   const deal = e.target.closest('[data-add-deal]');
   if (deal) {
     const x = S.deals[deal.dataset.addDeal];
