@@ -102,8 +102,9 @@ def _size_info(size: str) -> tuple[str, float]:
 
 def _resolve_store(conn, text: str) -> str:
     key = slug(text).replace("-", "")
-    for r in conn.execute("SELECT id, name FROM stores"):
-        if key in (r["id"], slug(r["name"]).replace("-", "")):
+    for r in conn.execute("SELECT id, name, aliases FROM stores"):
+        names = [r["name"], *json.loads(r["aliases"] or "[]")]
+        if key == r["id"] or key in {slug(n).replace("-", "") for n in names}:
             return r["id"]
     raise ImportProblem(f"unknown shop '{text}'")
 
@@ -156,8 +157,10 @@ def apply_price(conn, store_id: str, pid: str, *, price: float | None, special_p
                 label: str | None, valid_from: str | None, valid_until: str | None, source: str,
                 reported_by: int | None = None, branch: str | None = None):
     """Insert or update the current price of one product at one shop."""
-    cur = conn.execute("SELECT price FROM prices WHERE store_id = ? AND product_id = ?", (store_id, pid)).fetchone()
-    regular = price if price is not None else (cur["price"] if cur else None)
+    cur = conn.execute("SELECT price, source FROM prices WHERE store_id = ? AND product_id = ?",
+                       (store_id, pid)).fetchone()
+    # without a normal price, keep the one we have, unless it's only a sample price
+    regular = price if price is not None else (cur["price"] if cur and cur["source"] != "sample" else None)
     if regular is None:
         if special_price is None:
             raise ImportProblem("no price given")

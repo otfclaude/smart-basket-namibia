@@ -5,6 +5,8 @@ import asyncio
 import json
 import os
 import sqlite3
+import time
+import zlib
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
@@ -14,7 +16,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import STATIC_DIR, __version__, auth, db, deals, importer, logos, optimizer, sample
+from . import BUNDLED_DATA, STATIC_DIR, __version__, auth, db, deals, importer, leaflets, logos, optimizer, sample
 
 COOKIE = "nsb_session"
 
@@ -91,6 +93,14 @@ class SampleIn(BaseModel):
     enabled: bool
 
 
+class RefreshIn(BaseModel):
+    force: bool = False
+
+
+class KeyIn(BaseModel):
+    key: str = Field(min_length=20, max_length=300)
+
+
 # ---------------------------------------------------------------- app
 
 def get_conn(request: Request):
@@ -105,25 +115,32 @@ Conn = Annotated[sqlite3.Connection, Depends(get_conn)]
 
 
 def create_app(db_file: str | Path | None = None, refresh_hours: float | None = None) -> FastAPI:
+    """``refresh_hours``: fetch pamphlets, feeds and logos this often while running (0 = only on demand)."""
     db_file = str(db_file or db.db_path())
     conn = db.connect(db_file)
     db.init_db(conn)
     sample.ensure_sample(conn)
     conn.close()
     hours = refresh_hours if refresh_hours is not None else float(os.environ.get("NAMSHOP_REFRESH_HOURS", "6"))
+    refresher = leaflets.RefreshManager(db_file)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         task = None
-        if hours > 0 and importer.feed_config():
+        if hours > 0:
             async def loop():
                 while True:
                     c = db.connect(db_file)
                     try:
-                        await asyncio.to_thread(importer.refresh_feeds, c)
+                        last = json.loads(db.get_setting(c, "last_refresh", "{}") or "{}").get("at", "")
                     finally:
                         c.close()
-                    await asyncio.sleep(hours * 3600)
+                    age = (time.time() - _ts(last)) if last else 1e9
+                    if age >= hours * 3600:
+                        refresher.start(force=True)
+                        await asyncio.sleep(hours * 3600)
+                    else:
+                        await asyncio.sleep(hours * 3600 - age)
             task = asyncio.create_task(loop())
         yield
         if task:
@@ -132,6 +149,8 @@ def create_app(db_file: str | Path | None = None, refresh_hours: float | None = 
     app = FastAPI(title="Smart Basket Namibia", version=__version__, lifespan=lifespan,
                   docs_url="/api/docs", redoc_url=None, openapi_url="/api/openapi.json")
     app.state.db_file = db_file
+    app.state.refresher = refresher
+    baskets_cache: dict = {}
 
     def current_user(request: Request, conn: Conn):
         return auth.user_for_token(conn, request.cookies.get(COOKIE))
@@ -165,7 +184,10 @@ def create_app(db_file: str | Path | None = None, refresh_hours: float | None = 
         for x in deals.specials(conn, limit=100_000)["results"]:
             special_counts[x["store_id"]] = special_counts.get(x["store_id"], 0) + 1
         return {"stores": db.stores(conn), "categories": db.categories(conn), "today": db.today().isoformat(),
-                "special_counts": special_counts,
+                "special_counts": special_counts, "claude": leaflets.claude_configured(),
+                "last_refresh": json.loads(db.get_setting(conn, "last_refresh", "{}") or "{}"),
+                "refreshing": refresher.status()["running"],
+                "logo_version": zlib.crc32((db.get_setting(conn, "logo_version", "") or "").encode()),
                 "sample_data": sample.enabled(conn) and counts.get("sample", 0) > 0, "price_counts": counts,
                 "user": auth.public_user(user), "version": __version__}
 
@@ -260,6 +282,55 @@ def create_app(db_file: str | Path | None = None, refresh_hours: float | None = 
                                   [optimizer.Line(ln["key"], ln["qty"], ln["priority"]) for ln in lines],
                                   names, max_stores=body.max_stores, trip_cost=body.trip_cost, budget=body.budget)
 
+    # ---------------- pamphlets & the Refresh button
+    @app.post("/api/refresh")
+    def refresh(body: RefreshIn, user=Depends(current_user)):
+        """Anyone can ask for the latest pamphlets; repeat requests within a few minutes just return progress."""
+        return refresher.start(force=bool(body.force and user and user["is_admin"]))
+
+    @app.get("/api/refresh/status")
+    def refresh_status():
+        return refresher.status()
+
+    @app.get("/api/leaflets")
+    def get_leaflets(conn: Conn):
+        return {"leaflets": leaflets.list_leaflets(conn), "claude": leaflets.claude_configured(),
+                "sources": {k: [s["url"] for s in v] for k, v in leaflets.sources().items()}}
+
+    @app.get("/leaflets/{store_id}/{name}")
+    def leaflet_file(store_id: str, name: str):
+        path = leaflets.leaflet_path(store_id, name)
+        if path is None:
+            raise HTTPException(404, "No such pamphlet.")
+        kind = path.suffix.lower()
+        mime = {".pdf": "application/pdf", ".jpg": "image/jpeg", ".png": "image/png", ".webp": "image/webp",
+                ".gif": "image/gif"}.get(kind, "application/octet-stream")
+        return FileResponse(path, media_type=mime, headers={"Cache-Control": "public, max-age=86400",
+                                                            "X-Content-Type-Options": "nosniff"})
+
+    @app.get("/api/baskets")
+    def baskets(conn: Conn):
+        """One-tap baskets with what they cost today."""
+        version = tuple(conn.execute("SELECT COUNT(*), MAX(updated_at) FROM prices").fetchone()) + (db.today(),)
+        if baskets_cache.get("v") == version:
+            return baskets_cache["data"]
+        names = {s["id"]: s["name"] for s in db.stores(conn)}
+        out = []
+        for b in json.loads((BUNDLED_DATA / "baskets.json").read_text(encoding="utf-8")):
+            lines = [{"key": str(i), "item_id": it, "qty": q} for i, (it, q) in enumerate(b["items"])
+                     if conn.execute("SELECT 1 FROM items WHERE id = ?", (it,)).fetchone()]
+            opts = deals.cart_options(conn, lines)
+            res = optimizer.optimize(opts["info"], opts["options"],
+                                     [optimizer.Line(ln["key"], ln["qty"]) for ln in lines], names, max_stores=2)
+            out.append({**{k: b[k] for k in ("id", "emoji", "name", "blurb")},
+                        "lines": [{"item_id": ln["item_id"], "qty": ln["qty"], "name": opts["info"][ln["key"]]["name"],
+                                   "size": opts["info"][ln["key"]]["size"]} for ln in lines],
+                        "total": res.get("total"), "stores": [s["store_id"] for s in res.get("stores", [])],
+                        "best_single": res.get("best_single"), "count": sum(ln["qty"] for ln in lines)})
+        data = {"baskets": out}
+        baskets_cache.update(v=version, data=data)
+        return data
+
     # ---------------- saved lists
     def _list_out(r):
         return {"id": r["id"], "name": r["name"], "data": json.loads(r["data"]), "updated_at": r["updated_at"]}
@@ -344,6 +415,11 @@ def create_app(db_file: str | Path | None = None, refresh_hours: float | None = 
     def admin_refresh(conn: Conn, user=Depends(require_admin)):
         return {"results": importer.refresh_feeds(conn)}
 
+    @app.post("/api/admin/claude-key")
+    def admin_claude_key(body: KeyIn, user=Depends(require_admin)):
+        leaflets.save_api_key(body.key)
+        return {"claude": leaflets.claude_configured()}
+
     @app.post("/api/admin/sample")
     def admin_sample(body: SampleIn, conn: Conn, user=Depends(require_admin)):
         sample.set_enabled(conn, body.enabled)
@@ -360,7 +436,9 @@ def create_app(db_file: str | Path | None = None, refresh_hours: float | None = 
     def logo(store_id: str, conn: Conn):
         found = logos.logo_file(store_id)
         if found:
-            return FileResponse(found[0], media_type=found[1], headers={"Cache-Control": "public, max-age=86400"})
+            return FileResponse(found[0], media_type=found[1], headers={
+                "Cache-Control": "public, max-age=86400", "X-Content-Type-Options": "nosniff",
+                "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; img-src data:"})
         row = conn.execute("SELECT name, logo FROM stores WHERE id = ?", (store_id,)).fetchone()
         if row is None:
             raise HTTPException(404, "No such shop.")
@@ -378,3 +456,11 @@ def create_app(db_file: str | Path | None = None, refresh_hours: float | None = 
         return {"ok": True}
 
     return app
+
+
+def _ts(iso: str) -> float:
+    from datetime import datetime
+    try:
+        return datetime.fromisoformat(iso).timestamp()
+    except ValueError:
+        return 0.0

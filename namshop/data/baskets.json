@@ -1,0 +1,22 @@
+[
+  {"id": "month-end", "emoji": "🧺", "name": "Month-end stock-up", "blurb": "The big monthly shop",
+   "items": [["maize-meal-10kg", 1], ["rice-2kg", 1], ["sugar-white-2.5kg", 1], ["sunflower-oil-2l", 1],
+             ["cake-flour-2.5kg", 1], ["pilchards-400g", 2], ["baked-beans-410g", 2], ["black-tea-100", 1],
+             ["washing-powder-2kg", 1], ["toilet-paper-9", 1], ["bath-soap-175g", 2], ["salt-1kg", 1]]},
+  {"id": "braai", "emoji": "🔥", "name": "Braai weekend", "blurb": "Meat, rolls and the extras",
+   "items": [["boerewors-1kg", 1], ["chicken-portions-2kg", 1], ["rolls-6", 2], ["onions-3kg", 1],
+             ["tomatoes-1kg", 1], ["chakalaka-410g", 2], ["tomato-sauce-700ml", 1], ["soft-drink-2l", 2],
+             ["matches-10", 1]]},
+  {"id": "breakfast", "emoji": "🍳", "name": "Breakfast basics", "blurb": "Bread, eggs, tea and more",
+   "items": [["white-bread-600g", 2], ["eggs-18", 1], ["margarine-500g", 1], ["jam-900g", 1],
+             ["fresh-milk-2l", 1], ["oats-1kg", 1], ["black-tea-100", 1], ["instant-coffee-750g", 1]]},
+  {"id": "baby", "emoji": "👶", "name": "Baby essentials", "blurb": "Nappies, wipes and food",
+   "items": [["nappies-size3", 1], ["baby-wipes-80", 2], ["baby-cereal-500g", 1], ["fresh-milk-2l", 1],
+             ["petroleum-jelly-250ml", 1]]},
+  {"id": "cleaning", "emoji": "🧽", "name": "Cleaning day", "blurb": "A sparkling house",
+   "items": [["dishwashing-750ml", 1], ["bleach-750ml", 1], ["cream-cleaner-750ml", 1],
+             ["washing-powder-2kg", 1], ["laundry-bar-500g", 2], ["refuse-bags-20", 1]]},
+  {"id": "student", "emoji": "🎒", "name": "Student survival", "blurb": "Cheap and filling",
+   "items": [["maize-meal-5kg", 1], ["spaghetti-500g", 2], ["pilchards-400g", 3], ["baked-beans-410g", 3],
+             ["white-bread-600g", 1], ["peanut-butter-400g", 1], ["soft-drink-2l", 1]]}
+]

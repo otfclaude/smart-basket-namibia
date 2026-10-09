@@ -1,0 +1,48 @@
+{
+  "_comment": "Where each shop publishes its specials pamphlets. Found by desk research in October 2026; none of these pages could be opened from the research environment, so check them on first use. Types: 'page' = a page whose PDFs / leaflet images (or linked detail pages, see 'follow') are the pamphlet; 'flipbooks' = a regex for links to FlippingBook-style flipbooks, read as a PDF download or page images. 'match' limits which links count. Copy this file to <data dir>/leaflet_sources.json to change it.",
+  "shoprite": [
+    {"url": "https://www.shoprite.com.na/specials.html", "flipbooks": "specials\\.shoprite\\.com\\.na/deals/"},
+    {"url": "https://specials.na/brands/shoprite", "follow": "specials\\.na/special/"}
+  ],
+  "checkers": [
+    {"url": "https://www.checkers.com.na/specials.html", "flipbooks": "specials\\.checkers\\.com\\.na/deals/"},
+    {"url": "https://www.checkers.com.na/promotions.html", "flipbooks": "specials\\.checkers\\.com\\.na/deals/"},
+    {"url": "https://specials.na/brands/checkers", "follow": "specials\\.na/special/"}
+  ],
+  "usave": [
+    {"url": "https://specials.na/brands/usave", "follow": "specials\\.na/special/"}
+  ],
+  "okfoods": [
+    {"url": "https://www.okfoods.co.za/na/en_NA/specials.html", "flipbooks": "/leaflets/namibia"},
+    {"url": "https://specials.na/brands/ok-foods", "follow": "specials\\.na/special/"}
+  ],
+  "model": [
+    {"url": "https://model.na/", "follow": "special|promotion|leaflet|deal"},
+    {"url": "https://specials.na/brands/model", "follow": "specials\\.na/special/"}
+  ],
+  "spar": [
+    {"url": "https://mobile.spar.co.na/specials"},
+    {"url": "https://www.spar.co.na/", "follow": "special|leaflet|promotion"},
+    {"url": "https://weckevoigtsspar.com/promotions"},
+    {"url": "https://specials.na/brands/spar", "follow": "specials\\.na/special/"}
+  ],
+  "woermannbrock": [
+    {"url": "https://www.woermannbrock.com/special-offers/supermarkets-special-offers"},
+    {"url": "https://www.woermannbrock.com/home/leaflet-history-recent", "max": 2},
+    {"url": "https://specials.na/brands/woermann-brock", "follow": "specials\\.na/special/"}
+  ],
+  "choppies": [
+    {"url": "https://choppies.co.na/specials-promotions/"},
+    {"url": "https://choppies.co.na/pick-of-the-week/"},
+    {"url": "https://choppies.co.na/monthend-megasave/"},
+    {"url": "https://choppies.co.na/mid-month/"},
+    {"url": "https://specials.na/brands/choppies", "follow": "specials\\.na/special/"}
+  ],
+  "metrohyper": [
+    {"url": "https://www.metro.com.na/services/", "follow": "catalogue|promotion|special|leaflet|hyper"},
+    {"url": "https://specials.na/brands/metro", "follow": "specials\\.na/special/"}
+  ],
+  "foodlovers": [
+    {"url": "https://specials.na/brands/food-lovers-market", "follow": "specials\\.na/special/"}
+  ]
+}

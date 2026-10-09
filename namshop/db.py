@@ -78,6 +78,23 @@ CREATE TABLE IF NOT EXISTS lists(
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL);
 
+CREATE TABLE IF NOT EXISTS leaflets(
+    id INTEGER PRIMARY KEY,
+    store_id TEXT NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+    title TEXT NOT NULL DEFAULT '',
+    source_url TEXT NOT NULL,
+    page_url TEXT,
+    kind TEXT NOT NULL,
+    files TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    fetched_at TEXT NOT NULL,
+    valid_from TEXT,
+    valid_until TEXT,
+    status TEXT NOT NULL,
+    message TEXT,
+    n_specials INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(store_id, sha256));
+
 CREATE TABLE IF NOT EXISTS reports(
     id INTEGER PRIMARY KEY,
     user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
@@ -144,13 +161,21 @@ def _load_json(name: str):
 def init_db(conn: sqlite3.Connection):
     """Create tables and (re)load the shop registry and base catalogue. Safe to run on every start."""
     conn.executescript(SCHEMA)
-    for i, s in enumerate(_load_json("stores.json")):
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(stores)")}
+    for col in ("website", "aliases"):
+        if col not in cols:
+            conn.execute(f"ALTER TABLE stores ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
+    registry = _load_json("stores.json")
+    for i, s in enumerate(registry):
         conn.execute(
-            "INSERT INTO stores(id, name, grp, kind, sells, logo, sort) VALUES(?,?,?,?,?,?,?) "
+            "INSERT INTO stores(id, name, grp, kind, sells, logo, sort, website, aliases) VALUES(?,?,?,?,?,?,?,?,?) "
             "ON CONFLICT(id) DO UPDATE SET name=excluded.name, grp=excluded.grp, kind=excluded.kind, "
-            "sells=excluded.sells, logo=excluded.logo, sort=excluded.sort",
+            "sells=excluded.sells, logo=excluded.logo, sort=excluded.sort, website=excluded.website, "
+            "aliases=excluded.aliases",
             (s["id"], s["name"], s.get("group", ""), s.get("kind", ""), json.dumps(s.get("sells", [])),
-             json.dumps(s.get("logo", {})), i))
+             json.dumps(s.get("logo", {})), i, s.get("website", ""), json.dumps(s.get("aliases", []))))
+    keep = [s["id"] for s in registry]  # shops removed from the registry go, with their prices
+    conn.execute(f"DELETE FROM stores WHERE id NOT IN ({','.join('?' * len(keep))})", keep)
     catalog = _load_json("catalog.json")
     for it in catalog["items"]:
         upsert_item(conn, it["id"], it["name"], size=it.get("size", ""), unit=it.get("unit", "each"),
@@ -184,7 +209,8 @@ def stores(conn) -> list[dict]:
     out = []
     for r in conn.execute("SELECT * FROM stores ORDER BY sort, name"):
         out.append({"id": r["id"], "name": r["name"], "group": r["grp"], "kind": r["kind"],
-                    "sells": json.loads(r["sells"]), "logo": json.loads(r["logo"])})
+                    "sells": json.loads(r["sells"]), "logo": json.loads(r["logo"]), "website": r["website"],
+                    "aliases": json.loads(r["aliases"] or "[]")})
     return out
 
 

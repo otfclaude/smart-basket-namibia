@@ -2,6 +2,7 @@ fastapi>=0.110
 uvicorn>=0.27
 pulp>=2.8
 highspy>=1.7
+anthropic>=1.0
 # tests
 pytest>=8.0
 httpx>=0.27

@@ -1,25 +1,30 @@
 'use strict';
-/* Smart Basket Namibia: single-page front end (no build step). */
+/* Smart Basket Namibia: single-page front end (no build step). Animations use Motion (motion.dev). */
 
 // ------------------------------------------------------------------ helpers
 const $ = (sel, el = document) => el.querySelector(sel);
 const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
 const h = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const money = (n) => 'N$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const money0 = (n) => 'N$' + Math.round(Number(n || 0)).toLocaleString('en-US');
 const uid = () => Math.random().toString(36).slice(2, 10);
 const view = $('#view');
-const PRIOS = [['must', 'Must have'], ['high', 'High'], ['medium', 'Medium'], ['low', 'Nice to have']];
-const QUICK = ['Maize meal', 'Bread', 'Cooking oil', 'Sugar', 'Eggs', 'Milk', 'Chicken', 'Rice', 'Washing powder', 'Toilet paper', 'Nappies', 'Soap'];
+const PRIOS = [['must', '⭐ Must have'], ['high', 'High'], ['medium', 'Medium'], ['low', 'Nice to have']];
 
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
-function store(key, val) { try { if (val === undefined) return JSON.parse(localStorage.getItem(key)); localStorage.setItem(key, JSON.stringify(val)); } catch { /* storage unavailable */ } return null; }
+function store(key, val) {
+  try { if (val === undefined) return JSON.parse(localStorage.getItem(key)); localStorage.setItem(key, JSON.stringify(val)); } catch { /* storage off */ }
+  return null;
+}
+function sessionGet(k) { try { return sessionStorage.getItem(k); } catch { return null; } }
+function sessionSet(k, v) { try { sessionStorage.setItem(k, v); } catch { /* ignore */ } }
 
 async function api(path, opts = {}) {
   const o = { method: opts.method || (opts.body !== undefined ? 'POST' : 'GET'), headers: {}, credentials: 'same-origin' };
   if (opts.body !== undefined) { o.headers['Content-Type'] = 'application/json'; o.body = JSON.stringify(opts.body); }
   const r = await fetch(path, o);
   let data = null;
-  try { data = await r.json(); } catch { /* empty body */ }
+  try { data = await r.json(); } catch { /* empty */ }
   if (!r.ok) {
     let msg = data && data.detail;
     if (Array.isArray(msg)) msg = msg.map((d) => (d.loc ? d.loc[d.loc.length - 1] + ': ' : '') + d.msg).join('; ');
@@ -34,7 +39,7 @@ function toast(msg) {
   t.textContent = msg;
   t.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 2800);
 }
 
 function fmtDate(iso, opts = { weekday: 'short', day: 'numeric', month: 'short' }) {
@@ -54,165 +59,502 @@ function until(iso) {
   if (n === 1) return 'ends tomorrow';
   return 'until ' + fmtDate(iso);
 }
+function ago(iso) {
+  if (!iso) return '';
+  const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (mins < 2) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  if (mins < 48 * 60) return `${Math.round(mins / 60)} h ago`;
+  return `${Math.round(mins / 1440)} days ago`;
+}
 function addDays(iso, n) {
   const [y, m, d] = iso.split('-').map(Number);
   return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
 }
 
+// ------------------------------------------------------------------ product emoji
+const EMOJI = [[/maize|mahangu|mielie|pap/, '🌽'], [/roll/, '🥖'], [/bread|loaf/, '🍞'], [/rice/, '🍚'], [/flour/, '🌾'], [/sugar/, '🍬'],
+  [/spaghetti|macaroni|pasta/, '🍝'], [/oats|cereal|flakes/, '🥣'], [/milk|omaere|maas/, '🥛'], [/egg/, '🥚'], [/margarine|butter/, '🧈'],
+  [/cheese|cheddar/, '🧀'], [/yoghurt|yogurt/, '🍦'], [/chicken/, '🍗'], [/mince|beef|stew|steak/, '🥩'], [/boerewors|wors|sausage|polony|vienna/, '🌭'],
+  [/hake|fish|pilchard|tuna/, '🐟'], [/potato/, '🥔'], [/onion/, '🧅'], [/tomato sauce|ketchup/, '🥫'], [/tomato/, '🍅'], [/cabbage|spinach/, '🥬'],
+  [/apple/, '🍎'], [/banana/, '🍌'], [/orange/, '🍊'], [/oil/, '🌻'], [/beans|chakalaka/, '🫘'], [/peanut/, '🥜'], [/jam/, '🍓'], [/salt/, '🧂'],
+  [/soup|stock/, '🍲'], [/rooibos|tea/, '🍵'], [/coffee/, '☕'], [/juice|concentrate|cordial/, '🧃'], [/soft drink|coke|cola|soda/, '🥤'],
+  [/water/, '💧'], [/nappies|nappy|diaper/, '🧷'], [/wipes/, '🧻'], [/washing powder|laundry|detergent/, '🧺'], [/dish/, '🍽️'],
+  [/bleach|cleaner|handy/, '🧴'], [/refuse|bin bag/, '🗑️'], [/candle/, '🕯️'], [/match/, '🔥'], [/insect|doom/, '🦟'], [/toilet/, '🧻'],
+  [/toothpaste/, '🪥'], [/soap/, '🧼'], [/lotion|jelly|vaseline/, '🧴'], [/deodorant|roll-on/, '💨'], [/pads|sanitary/, '🌸'], [/biscuit|cookie/, '🍪'],
+  [/beer|wine|liquor/, '🍺'], [/snack|chips|crisps/, '🍿']];
+const CAT_EMOJI = { 'Staples & grains': '🌽', Bakery: '🍞', 'Dairy & eggs': '🥛', 'Meat & fish': '🍗', 'Fruit & veg': '🍎', 'Pantry & tins': '🥫',
+  Drinks: '🥤', Baby: '👶', 'Household & cleaning': '🧽', 'Personal care': '🧴' };
+const CAT_COLOR = { 'Staples & grains': '#f5a623', Bakery: '#c47f3a', 'Dairy & eggs': '#3b8cff', 'Meat & fish': '#e0123a', 'Fruit & veg': '#00964b',
+  'Pantry & tins': '#d35400', Drinks: '#8e44ad', Baby: '#ff6fa5', 'Household & cleaning': '#0f8b8d', 'Personal care': '#6c5ce7' };
+function emojiFor(name, category) {
+  const n = (name || '').toLowerCase();
+  for (const [re, e] of EMOJI) if (re.test(n)) return e;
+  return CAT_EMOJI[category] || '🛒';
+}
+
+// ------------------------------------------------------------------ motion
+const MO = window.Motion || null;
+const REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const EASE = [0.22, 1, 0.36, 1];
+function animate(el, kf, opts) {
+  if (!MO || REDUCED || !el) return null;
+  try { return MO.animate(el, kf, opts); } catch { return null; }
+}
+function reveal(els, opts = {}) {
+  els = [...els].filter(Boolean);
+  if (!els.length || !MO || REDUCED) return;
+  try {
+    const a = MO.animate(els, { opacity: [0, 1], transform: [`translateY(${opts.y ?? 18}px) scale(${opts.scale ?? 1})`, 'translateY(0px) scale(1)'] },
+      { duration: opts.duration ?? 0.5, delay: MO.stagger(opts.step ?? 0.035, { startDelay: opts.start ?? 0 }), ease: EASE });
+    if (a && a.then) a.then(() => els.forEach((e) => { e.style.transform = ''; e.style.opacity = ''; }));
+  } catch { /* ignore */ }
+}
+function countTo(el, to, fmt = (v) => String(Math.round(v))) {
+  if (!el) return;
+  const from = parseFloat(el.dataset.v || '0') || 0;
+  el.dataset.v = to;
+  if (!MO || REDUCED || from === to) { el.textContent = fmt(to); return; }
+  try { MO.animate(from, to, { duration: 0.9, ease: EASE, onUpdate: (v) => { el.textContent = fmt(v); } }); } catch { el.textContent = fmt(to); }
+}
+function pop(el) { animate(el, { transform: ['scale(1)', 'scale(1.25)', 'scale(1)'] }, { duration: 0.4, ease: EASE }); }
+function bumpCart() {
+  pop($('#cart-count'));
+  animate($('#cart-tab i'), { transform: ['rotate(0deg)', 'rotate(-18deg)', 'rotate(12deg)', 'rotate(0deg)'] }, { duration: 0.55 });
+}
+function flyToCart(fromEl, emoji) {
+  const target = $('#cart-tab');
+  if (!fromEl || !target || !MO || REDUCED) { bumpCart(); return; }
+  const a = fromEl.getBoundingClientRect(); const b = target.getBoundingClientRect();
+  const el = document.createElement('div');
+  el.className = 'fly'; el.textContent = emoji || '🛒';
+  $('#fx').append(el);
+  const x0 = a.left + a.width / 2 - 16, y0 = a.top + a.height / 2 - 16, x1 = b.left + b.width / 2 - 16, y1 = b.top + b.height / 2 - 16;
+  const mx = (x0 + x1) / 2, my = Math.min(y0, y1) - 140;
+  const anim = animate(el, { transform: [`translate(${x0}px,${y0}px) scale(1)`, `translate(${mx}px,${my}px) scale(1.5) rotate(-15deg)`, `translate(${x1}px,${y1}px) scale(.35) rotate(10deg)`],
+    opacity: [1, 1, 0.7] }, { duration: 0.85, ease: 'easeInOut' });
+  const done = () => { el.remove(); bumpCart(); };
+  if (anim && anim.then) anim.then(done); else done();
+}
+function confetti(x = window.innerWidth / 2, y = window.innerHeight / 3, n = 80) {
+  if (!MO || REDUCED) return;
+  const colors = ['#e0123a', '#ffc915', '#00964b', '#1559b5', '#3b8cff', '#ffffff'];
+  for (let i = 0; i < n; i++) {
+    const c = document.createElement('div');
+    c.className = 'confetti';
+    c.style.background = colors[i % colors.length];
+    $('#fx').append(c);
+    const ang = Math.random() * Math.PI * 2, v = 90 + Math.random() * 260, dx = Math.cos(ang) * v, dy = Math.sin(ang) * v - 220;
+    const anim = animate(c, { transform: [`translate(${x}px,${y}px) rotate(0deg)`, `translate(${x + dx}px,${y + dy}px) rotate(${Math.random() * 720 - 360}deg)`,
+      `translate(${x + dx * 1.4}px,${y + dy + 520}px) rotate(${Math.random() * 1080}deg)`], opacity: [1, 1, 0] },
+    { duration: 1.5 + Math.random() * 0.9, ease: [0.2, 0.6, 0.4, 1] });
+    if (anim && anim.then) anim.then(() => c.remove()); else c.remove();
+  }
+}
+function confettiFrom(el) {
+  if (!el) return confetti();
+  const r = el.getBoundingClientRect();
+  confetti(r.left + r.width / 2, r.top + r.height / 3);
+}
+// subtle 3D tilt + shine on deal cards (mouse only)
+view.addEventListener('pointermove', (e) => {
+  const card = e.target.closest('.deal');
+  if (!card || REDUCED || e.pointerType !== 'mouse') return;
+  const r = card.getBoundingClientRect();
+  const px = (e.clientX - r.left) / r.width, py = (e.clientY - r.top) / r.height;
+  card.style.setProperty('--ry', `${(px - 0.5) * 9}deg`);
+  card.style.setProperty('--rx', `${(0.5 - py) * 9}deg`);
+  card.style.setProperty('--mx', `${px * 100}%`);
+  card.style.setProperty('--my', `${py * 100}%`);
+});
+view.addEventListener('pointerout', (e) => {
+  const card = e.target.closest('.deal');
+  if (card && !card.contains(e.relatedTarget)) { card.style.removeProperty('--rx'); card.style.removeProperty('--ry'); }
+});
+
 // ------------------------------------------------------------------ state
 const S = {
-  meta: null, user: null, byId: {}, items: {},
-  specials: { q: '', category: '', sort: 'percent', stores: new Set(), limit: 48, data: null },
+  meta: null, user: null, byId: {}, items: {}, view: 'deals', timers: [], deals: {},
+  feed: { q: '', category: '', sort: 'percent', stores: new Set(), results: [], total: 0, loading: false },
   compare: { q: '', results: [], item: null },
-  cart: loadCart(), result: null, stale: false,
+  cart: loadCart(), result: null, buildSeq: 0, baskets: null,
 };
-
 function defaultCart() {
-  return { lines: [], mode: 'cheapest', budget: 500, maxStores: 3, tripCost: 0, stores: null, listId: null, listName: '' };
+  return { lines: [], mode: 'cheapest', budget: 600, maxStores: 3, tripCost: 0, stores: null, listId: null, listName: '' };
 }
 function loadCart() {
-  const c = store('nsb.cart.v1');
+  const c = store('nsb.cart.v2');
   return c && Array.isArray(c.lines) ? { ...defaultCart(), ...c } : defaultCart();
 }
-function saveCart() { store('nsb.cart.v1', S.cart); updateCartCount(); }
+function saveCart() { store('nsb.cart.v2', S.cart); updateCartCount(); }
 function updateCartCount() {
   const n = S.cart.lines.reduce((a, l) => a + l.qty, 0);
   const el = $('#cart-count');
   el.textContent = n;
   el.hidden = n === 0;
 }
-function addToCart(e, qty = 1, quiet = false) {
+function addToCart(e, qty = 1, opts = {}) {
   const pid = e.product_id || null;
   const ex = S.cart.lines.find((l) => l.item_id === e.item_id && (l.product_id || null) === pid);
   if (ex) ex.qty = Math.min(99, ex.qty + qty);
-  else S.cart.lines.push({ key: uid(), item_id: e.item_id, product_id: pid, name: e.name, size: e.size || '', brand: e.brand || null, qty, priority: 'high' });
-  S.stale = !!S.result;
+  else S.cart.lines.push({ key: uid(), item_id: e.item_id, product_id: pid, name: e.name, size: e.size || '', brand: e.brand || null,
+    category: e.category || '', qty, priority: 'high' });
   saveCart();
-  if (!quiet) toast(`Added ${e.brand && pid ? e.brand + ' ' : ''}${e.name} ${e.size || ''} to your cart`);
+  if (opts.from) flyToCart(opts.from, emojiFor(e.name, e.category)); else bumpCart();
+  if (!opts.quiet) toast(`Added ${e.brand && pid ? e.brand + ' ' : ''}${e.name} ${e.size || ''}`);
 }
+function rememberDeal(x) { const k = `${x.store_id}|${x.product_id}`; S.deals[k] = x; return k; }
 
 const storeName = (id) => (S.byId[id] ? S.byId[id].name : id);
-const logo = (id, cls = '') => `<img class="logo ${cls}" src="/logos/${encodeURIComponent(id)}.svg" alt="${h(storeName(id))}" title="${h(storeName(id))}" loading="lazy">`;
+const logo = (id, cls = '') => `<span class="logo ${cls}" title="${h(storeName(id))}"><img src="/logos/${encodeURIComponent(id)}.svg?v=${S.meta ? S.meta.logo_version : 0}" alt="${h(storeName(id))}" loading="lazy"></span>`;
 function sourceTag(x) {
-  if (x.source === 'sample') return '<span class="tag sample" title="Illustrative price, not from the shop">Sample price</span>';
-  if (x.source === 'community') return `<span class="tag community" title="Reported by a shopper${x.branch ? ' at ' + h(x.branch) : ''}">Reported by ${h(x.reporter || 'a shopper')}</span>`;
-  if ((x.source || '').startsWith('feed:')) return '<span class="tag good">Price feed</span>';
+  const s = x.source || '';
+  if (s === 'sample') return '<span class="tag sample" title="Illustrative price, not from the shop">Sample</span>';
+  if (s === 'community') return `<span class="tag community" title="Reported by a shopper${x.branch ? ' at ' + h(x.branch) : ''}">👋 ${h(x.reporter || 'Shopper')}</span>`;
+  if (s.startsWith('leaflet:')) return '<span class="tag leaflet" title="Read from the shop\'s pamphlet">📰 Pamphlet</span>';
+  if (s.startsWith('feed:')) return '<span class="tag good">Price feed</span>';
   return '<span class="tag good">From leaflet</span>';
 }
 async function itemDetail(id) {
   if (!S.items[id]) S.items[id] = await api('/api/items/' + encodeURIComponent(id));
   return S.items[id];
 }
+function clearTimers() {  // intervals and IntersectionObservers registered by the current view
+  S.timers.forEach((t) => (t && t.disconnect ? t.disconnect() : clearInterval(t)));
+  S.timers = [];
+}
 
-// ------------------------------------------------------------------ chrome: account, notice, shop strip
+// ------------------------------------------------------------------ chrome
 function renderAccountButton() {
   const el = $('#account');
   if (S.user) {
-    el.innerHTML = `<a class="btn small" href="#/account" title="My account">👤 ${h(S.user.name.split(' ')[0])}</a>`;
+    const ini = S.user.name.split(' ').map((p) => p[0]).slice(0, 2).join('').toUpperCase();
+    el.innerHTML = `<a class="avatar" href="#/me" title="${h(S.user.name)}">${h(ini)}</a>`;
   } else {
     el.innerHTML = '<button class="btn small" type="button" data-signin>Sign in</button>';
   }
-  $('#admin-tab').hidden = !(S.user && S.user.is_admin);
 }
-
 function renderNotice() {
   const n = $('#notice');
-  if (S.meta.sample_data && !sessionStorageGet('nsb.hideSample')) {
-    n.innerHTML = `<b>Sample prices:</b> prices tagged <span class="tag sample">Sample price</span> are illustrative, not real shop prices.
-      Real prices come from imported leaflets, price feeds and specials reported by shoppers.
-      <button class="btn small" type="button" id="hide-notice" style="margin-left:6px">Got it</button>`;
+  if (S.meta.sample_data && !sessionGet('nsb.hideSample')) {
+    n.innerHTML = `<span>🧪 <b>Some prices are samples</b> (tagged <span class="tag sample">Sample</span>) until real pamphlets are loaded. Tap
+      <b>Refresh</b> to fetch the latest pamphlets.</span><button class="btn small" type="button" id="hide-notice">Got it</button>`;
     n.hidden = false;
-    $('#hide-notice').onclick = () => { sessionStorageSet('nsb.hideSample', '1'); n.hidden = true; };
+    $('#hide-notice').onclick = () => { sessionSet('nsb.hideSample', '1'); animate(n, { opacity: [1, 0] }, { duration: 0.25 }); setTimeout(() => { n.hidden = true; }, 250); };
   } else n.hidden = true;
 }
-function sessionStorageGet(k) { try { return sessionStorage.getItem(k); } catch { return null; } }
-function sessionStorageSet(k, v) { try { sessionStorage.setItem(k, v); } catch { /* ignore */ } }
-
-function renderStrip() {
-  const strip = $('#store-strip');
-  if (S.view !== 'specials') { strip.innerHTML = ''; return; }
-  const sel = S.specials.stores;
-  strip.classList.toggle('filtering', sel.size > 0);
-  strip.innerHTML = S.meta.stores.map((s) => {
-    const n = (S.meta.special_counts || {})[s.id] || 0;
-    return `<button class="store-pill" type="button" data-store="${h(s.id)}" aria-pressed="${sel.has(s.id)}"
-      title="${h(s.name)} · ${h(s.kind)}"><img src="/logos/${encodeURIComponent(s.id)}.svg" alt="${h(s.name)}"><small>${n} special${n === 1 ? '' : 's'}</small></button>`;
-  }).join('');
+function lastRefreshText() {
+  const lr = S.meta.last_refresh || {};
+  return lr.at ? `Last checked ${ago(lr.at)}${lr.summary ? ' · ' + h(lr.summary) : ''}` : 'Pamphlets not fetched yet';
 }
 
-// ------------------------------------------------------------------ specials view
-function renderSpecials() {
-  const f = S.specials;
-  const cats = ['', ...S.meta.categories];
-  view.innerHTML = `
-    <div class="page-head"><div><h1>This week's specials</h1>
-      <p class="muted" id="sp-sub">Sales and promotions at ${S.meta.stores.length} Namibian shops. Tap a shop logo above to filter.</p></div></div>
-    <div class="toolbar">
-      <input type="search" id="sp-q" placeholder="Search specials: maize meal, oil, nappies…" value="${h(f.q)}" aria-label="Search specials">
-      <select id="sp-sort" aria-label="Sort">
-        ${[['percent', 'Biggest % off'], ['saving', 'Biggest N$ saving'], ['price', 'Lowest price'], ['ending', 'Ending soonest'], ['name', 'A–Z']]
-          .map(([v, t]) => `<option value="${v}" ${f.sort === v ? 'selected' : ''}>${t}</option>`).join('')}
-      </select>
-    </div>
-    <div class="chips" id="sp-cats">${cats.map((c) => `<button class="chip" type="button" data-cat="${h(c)}" aria-pressed="${f.category === c}">${h(c || 'All')}</button>`).join('')}</div>
-    <div class="deals" id="sp-grid"><div class="loading">Loading specials…</div></div>
-    <div class="more" id="sp-more"></div>`;
-  $('#sp-q').addEventListener('input', debounce((e) => { f.q = e.target.value; f.limit = 48; refreshSpecials(); }, 250));
-  $('#sp-sort').onchange = (e) => { f.sort = e.target.value; refreshSpecials(); };
-  $('#sp-cats').onclick = (e) => {
-    const b = e.target.closest('[data-cat]');
-    if (!b) return;
-    f.category = b.dataset.cat; f.limit = 48;
-    $$('#sp-cats .chip').forEach((c) => c.setAttribute('aria-pressed', c === b));
-    refreshSpecials();
-  };
-  refreshSpecials();
-}
-
-async function refreshSpecials() {
-  const f = S.specials;
-  const p = new URLSearchParams({ q: f.q, category: f.category, sort: f.sort, limit: f.limit });
-  if (f.stores.size) p.set('stores', [...f.stores].join(','));
-  const grid = $('#sp-grid');
-  try {
-    f.data = await api('/api/specials?' + p);
-  } catch (e) {
-    if (grid) grid.innerHTML = `<div class="empty"><b>Couldn't load specials</b>${h(e.message)}</div>`;
-    return;
-  }
-  if (S.view !== 'specials' || !$('#sp-grid')) return;
-  const d = f.data;
-  const filt = [f.stores.size ? [...f.stores].map(storeName).join(', ') : '', f.category, f.q && `“${f.q}”`].filter(Boolean).join(' · ');
-  $('#sp-sub').textContent = `${d.total} special${d.total === 1 ? '' : 's'} running today${filt ? ' · ' + filt : ''}. Tap a shop logo above to filter.`;
-  $('#sp-grid').innerHTML = d.results.length ? d.results.map(dealCard).join('')
-    : '<div class="empty" style="grid-column:1/-1"><b>No specials match</b>Try another search, category or shop.</div>';
-  $('#sp-more').innerHTML = d.total > d.results.length ? `<button class="btn" type="button" id="sp-load">Show more (${d.total - d.results.length} left)</button>` : '';
-  const more = $('#sp-load');
-  if (more) more.onclick = () => { f.limit += 48; refreshSpecials(); };
-}
-
-function dealCard(x, i) {
-  return `<article class="deal">
-    <div class="deal-top">${logo(x.store_id)}<span class="pct" aria-label="${x.saving_pct} percent off">-${x.saving_pct}%</span></div>
+// ------------------------------------------------------------------ deals (home)
+function dealCard(x) {
+  const k = rememberDeal(x);
+  const em = emojiFor(x.name, x.category);
+  const pct = x.saving_pct > 0 ? `-${x.saving_pct}%` : 'DEAL';
+  return `<article class="deal" data-deal="${h(k)}">
+    <div class="deal-top">${logo(x.store_id, 'sm')}${sourceTag(x)}</div>
+    <div class="deal-art" style="--c:${CAT_COLOR[x.category] || '#3b8cff'}"><span>${em}</span><span class="burst ${x.saving_pct > 0 ? '' : 'plain'}">${pct}</span></div>
     <div><div class="deal-brand">${h(x.brand)}</div><div class="deal-name">${h(x.name)} <small>${h(x.size)}</small></div></div>
-    <div class="deal-price price"><b>${money(x.price)}</b><s class="was">${money(x.regular_price)}</s></div>
-    <div class="deal-meta">${h(x.special_label || 'Special')} · ${h(until(x.valid_until))} · save ${money(x.saving)}</div>
-    <div class="deal-foot">${sourceTag(x)}<button class="btn small primary" type="button" data-add-deal="${i}">+ Add</button></div>
+    <div class="deal-price price"><b>${money(x.price)}</b>${x.saving > 0 ? `<s class="was">${money(x.regular_price)}</s>` : ''}</div>
+    <div class="deal-meta">${h(x.special_label || 'Special')} · ${h(until(x.valid_until))}</div>
+    <div class="deal-foot"><span class="deal-meta">${x.saving > 0 ? `Save ${money(x.saving)}` : h(storeName(x.store_id))}</span>
+      <button class="add-btn" type="button" data-add-deal="${h(k)}" aria-label="Add ${h(x.name)} to cart">＋ Add</button></div>
   </article>`;
 }
 
-// ------------------------------------------------------------------ compare view
+async function renderDeals() {
+  const f = S.feed;
+  const total = Object.values(S.meta.special_counts || {}).reduce((a, b) => a + b, 0);
+  const cats = ['', ...S.meta.categories];
+  view.innerHTML = `
+    <section class="hero">
+      <div>
+        <h1>Pay less for groceries <span class="wave">🇳🇦</span></h1>
+        <p class="hero-sub">This week's specials from ${S.meta.stores.length} Namibian shops in one place. Add a deal with one tap,
+          or let us build your cheapest basket.</p>
+        <div class="stats">
+          <div class="stat"><b id="st-total">0</b><small>specials today</small></div>
+          <div class="stat"><b id="st-shops">0</b><small>shops</small></div>
+          <div class="stat"><b id="st-max">0%</b><small>biggest saving</small></div>
+        </div>
+        <div class="hero-search"><span class="icon">🔎</span><input id="d-q" type="search" value="${h(f.q)}" aria-label="Search specials" autocomplete="off"></div>
+        <div class="hero-actions"><button class="btn gold big" type="button" data-refresh>🔄 Get the latest pamphlets</button>
+          <span class="muted" id="last-refresh">${lastRefreshText()}</span></div>
+      </div>
+      <div class="hero-art" id="hero-art"></div>
+    </section>
+    <div class="scroll-x shop-rail ${f.stores.size ? 'filtering' : ''}" id="shop-rail">${S.meta.stores.map((s) => {
+      const n = (S.meta.special_counts || {})[s.id] || 0;
+      return `<button class="shop-pill" type="button" data-store="${h(s.id)}" aria-pressed="${f.stores.has(s.id)}" title="${h(s.name)} · ${h(s.kind)}">${logo(s.id)}<small>${n} deal${n === 1 ? '' : 's'}</small></button>`;
+    }).join('')}</div>
+    <div class="section-head"><div><h2>🔥 Hottest deals right now</h2><p class="muted">The biggest price drops this week</p></div>
+      <div class="car-nav"><button type="button" data-car="-1" aria-label="Previous deals">‹</button><button type="button" data-car="1" aria-label="More deals">›</button></div></div>
+    <div class="carousel" id="hot">${'<div class="sk"></div>'.repeat(4)}</div>
+    <div class="section-head"><div><h2>⚡ One-tap baskets</h2><p class="muted">Tap one and we build the cheapest cart for you</p></div></div>
+    <div class="baskets" id="baskets">${'<div class="sk" style="min-height:150px"></div>'.repeat(3)}</div>
+    <div class="section-head" id="all-head"><div><h2>🏷️ All specials</h2><p class="muted" id="sp-sub">Loading…</p></div>
+      <select id="d-sort" aria-label="Sort" style="width:auto">${[['percent', 'Biggest % off'], ['saving', 'Biggest N$ saving'], ['price', 'Lowest price'], ['ending', 'Ending soonest'], ['name', 'A–Z']]
+        .map(([v, t]) => `<option value="${v}" ${f.sort === v ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+    <div class="scroll-x" id="cats">${cats.map((c) => `<button class="chip" type="button" data-cat="${h(c)}" aria-pressed="${f.category === c}">${c ? (CAT_EMOJI[c] || '🛒') + ' ' + h(c) : '✨ All'}</button>`).join('')}</div>
+    <div class="grid" id="grid"></div>
+    <div class="sentinel" id="sentinel"></div>`;
+
+  countTo($('#st-total'), total);
+  countTo($('#st-shops'), S.meta.stores.length);
+  reveal($$('.shop-pill'), { step: 0.03, y: 10 });
+  typewriter($('#d-q'), ['maize meal', 'cooking oil', 'nappies', 'chicken', 'washing powder', 'bread', 'sugar']);
+
+  $('#d-q').addEventListener('input', debounce((e) => { f.q = e.target.value; loadFeed(true); }, 280));
+  $('#d-q').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#all-head').scrollIntoView({ behavior: 'smooth' }); });
+  $('#d-sort').onchange = (e) => { f.sort = e.target.value; loadFeed(true); };
+  $('#cats').onclick = (e) => {
+    const b = e.target.closest('[data-cat]');
+    if (!b) return;
+    f.category = b.dataset.cat;
+    $$('#cats .chip').forEach((c) => c.setAttribute('aria-pressed', c === b));
+    pop(b);
+    loadFeed(true);
+  };
+  $('#shop-rail').onclick = (e) => {
+    const b = e.target.closest('[data-store]');
+    if (!b) return;
+    f.stores.has(b.dataset.store) ? f.stores.delete(b.dataset.store) : f.stores.add(b.dataset.store);
+    b.setAttribute('aria-pressed', f.stores.has(b.dataset.store));
+    $('#shop-rail').classList.toggle('filtering', f.stores.size > 0);
+    pop(b);
+    loadFeed(true);
+  };
+  $$('[data-car]').forEach((b) => b.onclick = () => { const c = $('#hot'); c.scrollBy({ left: +b.dataset.car * (c.clientWidth * 0.8), behavior: 'smooth' }); });
+
+  const io = new IntersectionObserver((ents) => { if (ents.some((x) => x.isIntersecting)) loadFeed(false); }, { rootMargin: '400px' });
+  io.observe($('#sentinel'));
+  S.timers.push(io);
+
+  loadHot();
+  loadBaskets($('#baskets'));
+  loadFeed(true);
+}
+
+function typewriter(input, words) {
+  if (!input || REDUCED) { if (input) input.placeholder = 'Search specials: ' + words.slice(0, 3).join(', ') + '…'; return; }
+  let wi = 0, ci = 0, dir = 1;
+  const t = setInterval(() => {
+    if (!document.body.contains(input)) { clearInterval(t); return; }
+    const w = words[wi];
+    ci += dir;
+    input.placeholder = 'Search ' + w.slice(0, ci) + (dir > 0 ? '▍' : '');
+    if (ci >= w.length + 8) dir = -1;
+    if (ci <= 0) { dir = 1; wi = (wi + 1) % words.length; }
+  }, 90);
+  S.timers.push(t);
+}
+
+async function loadHot() {
+  let d;
+  try { d = await api('/api/specials?sort=percent&limit=12'); } catch { return; }
+  if (S.view !== 'deals') return;
+  const hot = $('#hot');
+  hot.innerHTML = d.results.length ? d.results.map(dealCard).join('') : '<div class="empty"><b>No specials yet</b>Tap Refresh to fetch pamphlets.</div>';
+  reveal(hot.children, { step: 0.06, scale: 0.95 });
+  if (d.results[0]) countTo($('#st-max'), d.results[0].saving_pct, (v) => `${Math.round(v)}%`);
+  const art = $('#hero-art');
+  art.innerHTML = d.results.slice(0, 3).map((x) => `<button class="bubble" type="button" data-add-deal="${h(rememberDeal(x))}" title="Add to cart">
+      <span class="em">${emojiFor(x.name, x.category)}</span><span><b>${h(x.name)}</b><span class="muted" style="font-size:.78rem">${h(storeName(x.store_id))}</span>
+      <span class="p">${money(x.price)}</span></span>${x.saving_pct > 0 ? `<span class="off">-${x.saving_pct}%</span>` : ''}</button>`).join('');
+  reveal(art.children, { step: 0.15, scale: 0.8, y: 30, duration: 0.7 });
+  // gentle auto-scroll that pauses while the shopper interacts
+  let paused = false;
+  ['pointerenter', 'focusin', 'touchstart'].forEach((ev) => hot.addEventListener(ev, () => { paused = true; }, { passive: true }));
+  hot.addEventListener('pointerleave', () => { paused = false; });
+  const t = setInterval(() => {
+    if (paused || !document.body.contains(hot) || REDUCED) return;
+    const end = hot.scrollLeft + hot.clientWidth >= hot.scrollWidth - 10;
+    hot.scrollTo({ left: end ? 0 : hot.scrollLeft + (hot.firstElementChild ? hot.firstElementChild.offsetWidth + 14 : 280), behavior: 'smooth' });
+  }, 4200);
+  S.timers.push(t);
+}
+
+async function loadFeed(reset) {
+  const f = S.feed;
+  if (f.loading) { if (reset) f.pending = true; return; }
+  if (!reset && f.results.length >= f.total) return;
+  f.loading = true;
+  const p = new URLSearchParams({ q: f.q, category: f.category, sort: f.sort, limit: 36, offset: reset ? 0 : f.results.length });
+  if (f.stores.size) p.set('stores', [...f.stores].join(','));
+  try {
+    const d = await api('/api/specials?' + p);
+    if (S.view !== 'deals') return;
+    const grid = $('#grid');
+    if (reset) { f.results = []; grid.innerHTML = ''; }
+    f.results = f.results.concat(d.results);
+    f.total = d.total;
+    const before = grid.children.length;
+    grid.insertAdjacentHTML('beforeend', d.results.map(dealCard).join(''));
+    if (!f.results.length) grid.innerHTML = '<div class="empty" style="grid-column:1/-1"><span class="big-emoji">🔍</span><b>No specials match</b>Try another word, category or shop.</div>';
+    reveal([...grid.children].slice(before), { step: 0.025 });
+    const bits = [f.stores.size ? [...f.stores].map(storeName).join(', ') : '', f.category, f.q && `“${f.q}”`].filter(Boolean).join(' · ');
+    $('#sp-sub').textContent = `${d.total} special${d.total === 1 ? '' : 's'}${bits ? ' · ' + bits : ''}`;
+  } catch (e) {
+    toast(e.message);
+  } finally {
+    f.loading = false;
+    if (f.pending) { f.pending = false; loadFeed(true); }
+  }
+}
+
+async function loadBaskets(box) {
+  try {
+    if (!S.baskets) S.baskets = (await api('/api/baskets')).baskets;
+  } catch { if (box) box.innerHTML = ''; return; }
+  if (!box || !document.body.contains(box)) return;
+  box.innerHTML = S.baskets.map((b) => `<button class="basket" type="button" data-basket="${h(b.id)}">
+      <span class="em">${b.emoji}</span><b>${h(b.name)}</b><small>${h(b.blurb)} · ${b.count} items</small>
+      <span class="bp">${b.total ? money0(b.total) : ''}<small>${b.stores && b.stores.length ? 'at ' + b.stores.map(storeName).join(' + ') : ''}</small></span></button>`).join('');
+  reveal(box.children, { step: 0.06, scale: 0.92 });
+}
+
+function useBasket(id, fromEl) {
+  const b = (S.baskets || []).find((x) => x.id === id);
+  if (!b) return;
+  const wasEmpty = !S.cart.lines.length;
+  b.lines.forEach((ln) => addToCart({ item_id: ln.item_id, name: ln.name, size: ln.size }, ln.qty, { quiet: true }));
+  if (fromEl) confettiFrom(fromEl);
+  toast(`${b.emoji} ${b.name}: ${b.count} items ${wasEmpty ? 'in your cart' : 'added to your cart'}`);
+  S.celebrate = true;
+  if (S.view === 'cart') renderCart(); else location.hash = '#/cart';
+}
+
+// ------------------------------------------------------------------ pamphlets
+async function renderPamphlets() {
+  view.innerHTML = `<div class="section-head" style="margin-top:6px"><div><h1>📰 This week's pamphlets</h1>
+      <p class="muted" id="pm-sub">${lastRefreshText()}</p></div>
+      <button class="btn gold big" type="button" data-refresh>🔄 Get the latest pamphlets</button></div>
+    <div id="pm-note"></div>
+    <div class="pamphlets" id="pm">${'<div class="sk"></div>'.repeat(6)}</div>`;
+  let d;
+  try { d = await api('/api/leaflets'); } catch (e) { $('#pm').innerHTML = `<div class="empty">${h(e.message)}</div>`; return; }
+  if (S.view !== 'pamphlets') return;
+  const latest = {};
+  d.leaflets.forEach((l) => { if (!latest[l.store_id]) latest[l.store_id] = l; });
+  S.pamphlets = latest;
+  if (!d.claude) {
+    $('#pm-note').innerHTML = `<div class="callout info">📖 Pamphlets are saved here so you can flip through them. Prices are read from them automatically
+      once Claude is connected (an admin adds the key on the <a href="#/me">Me</a> page).</div>`;
+  }
+  const stores = S.meta.stores;
+  $('#pm').innerHTML = stores.map((s) => {
+    const l = latest[s.id];
+    const hasSource = !!(d.sources || {})[s.id];
+    if (!l) {
+      return `<article class="pamphlet none"><div class="cover"><div class="pdf">📭</div></div><div class="body">${logo(s.id)}
+        <b>${h(s.name)}</b><span class="muted" style="font-size:.85rem">${hasSource ? 'No pamphlet found yet. Tap Refresh to look again.' : 'This shop doesn\'t publish pamphlets online.'}</span>
+        ${s.website ? `<a class="btn small" href="${h(s.website)}" target="_blank" rel="noopener">Shop's website ↗</a>` : ''}</div></article>`;
+    }
+    const cover = l.kind === 'images' ? `<img src="${h(l.files[0])}" alt="" loading="lazy">` : '<div class="pdf">📄</div>';
+    const status = l.status === 'read' ? `<span class="tag good">✓ ${l.n_specials} prices added</span>`
+      : l.status === 'error' ? `<span class="tag sample" title="${h(l.message)}">⚠️ Couldn't read prices</span>` : '<span class="tag leaflet">📖 Flip through it</span>';
+    return `<article class="pamphlet"><button class="cover" type="button" data-open="${h(s.id)}" aria-label="Open ${h(s.name)} pamphlet">${cover}<span class="pages">${l.pages} page${l.pages === 1 ? '' : 's'}</span></button>
+      <div class="body"><div class="row between">${logo(s.id)}${status}</div><b>${h(l.title || s.name + ' specials')}</b>
+      <span class="muted" style="font-size:.85rem">${l.valid_until ? 'Valid ' + (l.valid_from ? fmtDate(l.valid_from) + ' – ' : 'until ') + fmtDate(l.valid_until) : 'Fetched ' + ago(l.fetched_at)}</span>
+      <div class="row"><button class="btn small primary" type="button" data-open="${h(s.id)}">Open</button>
+      ${l.page_url ? `<a class="btn small" href="${h(l.page_url)}" target="_blank" rel="noopener">Source ↗</a>` : ''}</div></div></article>`;
+  }).join('');
+  reveal($('#pm').children, { step: 0.05, scale: 0.95 });
+}
+
+function openViewer(storeId) {
+  const l = (S.pamphlets || {})[storeId];
+  if (!l) return;
+  $('#viewer-title').textContent = `${storeName(storeId)}: ${l.title || 'pamphlet'}`;
+  $('#viewer-open').href = l.files[0];
+  $('#viewer-body').innerHTML = l.kind === 'images'
+    ? `<div class="pages-strip">${l.files.map((f, i) => `<img src="${h(f)}" alt="Page ${i + 1}" loading="lazy">`).join('')}</div>`
+    : `<iframe src="${h(l.files[0])}" title="${h(storeName(storeId))} pamphlet"></iframe>`;
+  $('#viewer').showModal();
+}
+
+// ------------------------------------------------------------------ refresh button
+const R = { timer: null, prev: {}, userStarted: false, hideTimer: null };
+async function startRefresh() {
+  R.userStarted = true;
+  $('#refresh-btn').classList.add('spinning');
+  try {
+    const s = await api('/api/refresh', { body: { force: false } });
+    showRefresh(s);
+    if (s.running) pollRefresh();
+    else {
+      $('#refresh-btn').classList.remove('spinning');
+      if (s.next_allowed_in > 0) toast(`Pamphlets were just checked. You can refresh again in ${Math.ceil(s.next_allowed_in / 60)} min.`);
+    }
+  } catch (e) {
+    $('#refresh-btn').classList.remove('spinning');
+    toast(e.message);
+  }
+}
+function pollRefresh() {
+  clearTimeout(R.timer);
+  R.timer = setTimeout(async () => {
+    let s;
+    try { s = await api('/api/refresh/status'); } catch { pollRefresh(); return; }
+    showRefresh(s);
+    if (s.running) pollRefresh(); else onRefreshDone(s);
+  }, 900);
+}
+const RS_ICON = { queued: '⏳', done: '✅', none: '📭', error: '⚠️' };
+function showRefresh(s) {
+  const sheet = $('#refresh-sheet');
+  const shops = Object.entries(s.shops || {});
+  if (!shops.length || (!R.userStarted && sheet.hidden)) return;  // background refreshes only spin the button
+  clearTimeout(R.hideTimer);
+  const done = shops.filter(([, x]) => ['done', 'none', 'error'].includes(x.state)).length;
+  const firstOpen = sheet.hidden;
+  sheet.hidden = false;
+  sheet.innerHTML = `<div class="rs-head"><b>${s.running ? '🔄 Getting the latest pamphlets' : '✅ Pamphlets checked'}</b>
+      <button class="x" type="button" id="rs-close" aria-label="Close">✕</button></div>
+    <div class="rs-progress"><div style="width:${Math.round(100 * done / shops.length)}%"></div></div>
+    ${s.running ? '' : `<p class="muted" style="margin:0 0 6px">${h(s.summary || '')}</p>`}
+    ${shops.map(([id, x]) => `<div class="rs-shop" data-rs="${h(id)}">${logo(id, 'sm')}<div><b style="font-size:.88rem">${h(x.name || storeName(id))}</b>
+      <div class="rs-msg">${h(x.message || '')}</div></div>
+      <span class="rs-icon ${['searching', 'downloading', 'reading'].includes(x.state) ? 'busy' : ''}">${RS_ICON[x.state] || ''}</span></div>`).join('')}
+    ${s.claude ? '' : '<p class="rs-msg" style="margin-top:8px">ℹ️ Pamphlets are saved to flip through. Prices are read automatically once Claude is connected.</p>'}`;
+  $('#rs-close').onclick = hideSheet;
+  if (firstOpen) animate(sheet, { opacity: [0, 1], transform: ['translateY(30px) scale(.96)', 'translateY(0px) scale(1)'] }, { duration: 0.4, ease: EASE });
+  shops.forEach(([id, x]) => { if (R.prev[id] && R.prev[id] !== x.state && ['done', 'none', 'error'].includes(x.state)) pop($(`[data-rs="${id}"] .rs-icon`, sheet)); });
+  R.prev = Object.fromEntries(shops.map(([id, x]) => [id, x.state]));
+}
+function hideSheet() {
+  const sheet = $('#refresh-sheet');
+  if (sheet.hidden) return;
+  const a = animate(sheet, { opacity: [1, 0], transform: ['translateY(0px)', 'translateY(20px)'] }, { duration: 0.25 });
+  const done = () => { sheet.hidden = true; sheet.style.opacity = ''; sheet.style.transform = ''; };
+  if (a && a.then) a.then(done); else done();
+}
+async function onRefreshDone(s) {
+  $('#refresh-btn').classList.remove('spinning');
+  R.userStarted = false;
+  R.hideTimer = setTimeout(() => { if (!$('#refresh-sheet').matches(':hover')) hideSheet(); }, 7000);
+  const total = Object.values(s.shops || {}).reduce((a, x) => a + (x.specials || 0), 0);
+  if (total > 0) { confetti(); toast(`🎉 ${total} new prices from this week's pamphlets`); }
+  S.baskets = null; S.items = {};
+  await loadMeta();
+  if (['deals', 'pamphlets', 'compare'].includes(S.view)) route();
+}
+
+// ------------------------------------------------------------------ compare
 function renderCompare() {
   const c = S.compare;
+  const QUICK = ['Maize meal', 'Bread', 'Cooking oil', 'Sugar', 'Eggs', 'Milk', 'Chicken', 'Rice', 'Washing powder', 'Toilet paper', 'Nappies', 'Soap'];
   view.innerHTML = `
-    <div class="page-head"><div><h1>Compare prices</h1><p class="muted">Search any product to see what it costs at every shop today, specials included.</p></div></div>
+    <div class="section-head" style="margin-top:6px"><div><h1>🔎 Compare prices</h1><p class="muted">What anything costs at every shop today, specials included.</p></div></div>
     <div class="compare">
       <div>
-        <input type="search" id="cmp-q" placeholder="e.g. sugar, Sunfoil, toilet paper, 10kg maize meal" value="${h(c.q)}" aria-label="Search products">
-        <div class="chips" style="margin-top:8px" id="cmp-quick">${QUICK.map((q) => `<button class="chip" type="button" data-q="${h(q)}">${h(q)}</button>`).join('')}</div>
+        <div class="addbox"><span class="icon">🔎</span><input type="search" id="cmp-q" placeholder="e.g. sugar, Sunfoil, toilet paper" value="${h(c.q)}" aria-label="Search products" autocomplete="off"></div>
+        <div class="scroll-x" style="margin-top:10px" id="cmp-quick">${QUICK.map((q) => `<button class="chip" type="button" data-q="${h(q)}">${emojiFor(q)} ${h(q)}</button>`).join('')}</div>
         <div class="results" id="cmp-results"></div>
       </div>
-      <div class="panel" id="cmp-detail"><div class="empty"><b>Pick a product</b>Its price at each shop will show here, cheapest first.</div></div>
+      <div class="panel" id="cmp-detail"><div class="empty"><span class="big-emoji">⚖️</span><b>Pick a product</b>Its price at each shop shows here, cheapest first.</div></div>
     </div>`;
   const run = async () => {
     const q = c.q.trim();
@@ -221,7 +563,7 @@ function renderCompare() {
       const d = await api('/api/search?' + new URLSearchParams({ q, limit: 20 }));
       if (q !== c.q.trim()) return;
       c.results = d.results;
-      drawCompareResults();
+      drawCompareResults(true);
       if (c.results.length && (!c.item || !c.results.some((r) => r.id === c.item.id))) showItem(c.results[0].id);
     } catch (e) { toast(e.message); }
   };
@@ -229,72 +571,75 @@ function renderCompare() {
   $('#cmp-quick').onclick = (e) => {
     const b = e.target.closest('[data-q]');
     if (!b) return;
-    c.q = b.dataset.q; $('#cmp-q').value = c.q; c.item = null; run();
+    c.q = b.dataset.q; $('#cmp-q').value = c.q; c.item = null; pop(b); run();
   };
   $('#cmp-results').onclick = (e) => { const b = e.target.closest('[data-item]'); if (b) showItem(b.dataset.item); };
   drawCompareResults();
   if (c.item) drawItem(c.item); else if (c.q) run();
 }
-
-function drawCompareResults() {
+function drawCompareResults(animateIn) {
   const c = S.compare;
   const el = $('#cmp-results');
   if (!el) return;
   if (!c.q.trim()) { el.innerHTML = ''; return; }
   el.innerHTML = c.results.length ? c.results.map((r) => `
-    <button class="result" type="button" data-item="${h(r.id)}" aria-current="${c.item && c.item.id === r.id}">
+    <button class="result" type="button" data-item="${h(r.id)}" aria-current="${!!(c.item && c.item.id === r.id)}"><span class="em">${emojiFor(r.name, r.category)}</span>
       <span><span class="r-name">${h(r.name)}</span> <span class="r-sub">${h(r.size)}</span>
-        <span class="r-sub" style="display:block">${h(r.category)} · ${r.n_shops} shop${r.n_shops === 1 ? '' : 's'}${r.n_specials ? ` · <b style="color:var(--red)">${r.n_specials} on special</b>` : ''}</span></span>
+        <span class="r-sub" style="display:block">${r.n_shops} shop${r.n_shops === 1 ? '' : 's'}${r.n_specials ? ` · <b style="color:var(--red)">${r.n_specials} on special</b>` : ''}</span></span>
       <span class="r-best">${r.best ? `from<b>${money(r.best.price)}</b>${h(r.best.store_name)}` : 'no prices yet'}</span>
-    </button>`).join('') : '<div class="empty"><b>Nothing found</b>Try a simpler word, e.g. “oil” or “nappies”.</div>';
+    </button>`).join('') : '<div class="empty"><b>Nothing found</b>Try a simpler word, like “oil” or “nappies”.</div>';
+  if (animateIn) reveal(el.children, { step: 0.03, y: 8 });
 }
-
 async function showItem(id) {
   try {
     delete S.items[id];
     S.compare.item = await itemDetail(id);
-    drawItem(S.compare.item);
+    drawItem(S.compare.item, true);
     drawCompareResults();
   } catch (e) { toast(e.message); }
 }
-
-function drawItem(it) {
+function drawItem(it, animateIn) {
   const el = $('#cmp-detail');
   if (!el) return;
   const best = it.prices[0];
   const rows = it.prices.map((p, i) => `
-    <tr class="${p.price === best.price ? 'best' : ''}">
+    <tr class="${best && p.price === best.price ? 'best' : ''}">
       <td>${logo(p.store_id, 'sm')}</td>
-      <td><b>${h(p.brand)}</b><div class="muted hide-sm" style="font-size:.78rem">${sourceTag(p)}</div></td>
-      <td class="num price"><b style="${p.on_special ? 'color:var(--red)' : ''}">${money(p.price)}</b>${p.on_special ? `<br><s class="was">${money(p.regular_price)}</s>` : ''}</td>
-      <td class="hide-sm">${p.on_special ? `<span class="tag special">-${p.saving_pct}%</span><div class="muted" style="font-size:.75rem">${h(p.special_label || '')} · ${h(until(p.valid_until))}</div>` : '<span class="muted">-</span>'}</td>
+      <td><b>${h(p.brand)}</b><div class="hide-sm" style="margin-top:2px">${sourceTag(p)}</div></td>
+      <td class="num price"><b style="${p.on_special ? 'color:var(--red)' : ''}">${money(p.price)}</b>${p.saving > 0 ? `<br><s class="was">${money(p.regular_price)}</s>` : ''}</td>
+      <td class="hide-sm">${p.on_special ? `<span class="tag special">${p.saving_pct > 0 ? '-' + p.saving_pct + '%' : 'Special'}</span><div class="muted" style="font-size:.74rem">${h(until(p.valid_until))}</div>` : '<span class="muted">–</span>'}</td>
       <td class="num hide-sm muted" style="font-size:.8rem">${money(p.unit_price)} ${h(p.unit_label)}</td>
-      <td class="num"><button class="btn small" type="button" data-add-price="${i}" aria-label="Add ${h(p.brand)} to cart">+</button></td>
+      <td class="num"><button class="add-btn" type="button" data-add-price="${i}" aria-label="Add ${h(p.brand)} to cart">＋</button></td>
     </tr>`).join('');
   el.innerHTML = `
     <div class="row between" style="align-items:flex-start">
-      <div><h2 style="margin:0">${h(it.name)} <span class="muted">${h(it.size)}</span></h2><div class="muted">${h(it.category)} · ${it.prices.length} price${it.prices.length === 1 ? '' : 's'} at ${new Set(it.prices.map((p) => p.store_id)).size} shops</div></div>
-      <button class="btn primary" type="button" id="add-any">+ Add to cart (any brand)</button>
+      <div class="row"><span style="font-size:2.4rem">${emojiFor(it.name, it.category)}</span><div><h2 style="margin:0">${h(it.name)} <span class="muted">${h(it.size)}</span></h2>
+        <div class="muted">${h(it.category)} · ${it.prices.length} price${it.prices.length === 1 ? '' : 's'}</div></div></div>
+      <button class="btn primary" type="button" id="add-any">＋ Add (any brand)</button>
     </div>
-    ${best ? `<div class="alert ok">Cheapest today: <b>${money(best.price)}</b> for ${h(best.brand)} at <b>${h(best.store_name)}</b>${best.on_special ? ' (on special)' : ''}.
+    ${best ? `<div class="callout ok">🏆 Cheapest today: <b>${money(best.price)}</b> for ${h(best.brand)} at <b>${h(best.store_name)}</b>${best.on_special ? ' (on special)' : ''}.
       ${it.prices.length > 1 ? `The priciest is ${money(it.prices[it.prices.length - 1].price)}.` : ''}</div>` : '<div class="empty">No shop has a price for this yet.</div>'}
-    ${rows ? `<div style="overflow-x:auto"><table class="prices"><thead><tr><th>Shop</th><th>Brand</th><th class="num">Price</th><th class="hide-sm">Special</th><th class="num hide-sm">Unit price</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : ''}`;
-  $('#add-any').onclick = () => addToCart({ item_id: it.id, name: it.name, size: it.size });
-  el.querySelector('tbody')?.addEventListener('click', (e) => {
-    const b = e.target.closest('[data-add-price]');
-    if (!b) return;
-    const p = it.prices[+b.dataset.addPrice];
-    addToCart({ item_id: it.id, product_id: p.product_id, name: it.name, size: it.size, brand: p.brand });
-  });
+    ${rows ? `<div style="overflow-x:auto"><table class="prices"><thead><tr><th>Shop</th><th>Brand</th><th class="num">Price</th><th class="hide-sm">Special</th><th class="num hide-sm">Unit</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : ''}`;
+  $('#add-any').onclick = (e) => addToCart({ item_id: it.id, name: it.name, size: it.size, category: it.category }, 1, { from: e.currentTarget });
+  const tb = el.querySelector('tbody');
+  if (tb) {
+    tb.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-add-price]');
+      if (!b) return;
+      const p = it.prices[+b.dataset.addPrice];
+      addToCart({ item_id: it.id, product_id: p.product_id, name: it.name, size: it.size, brand: p.brand, category: it.category }, 1, { from: b });
+    });
+    if (animateIn) reveal(tb.children, { step: 0.03, y: 6 });
+  }
 }
 
-// ------------------------------------------------------------------ cart view
+// ------------------------------------------------------------------ cart
 function attachSuggest(input, box, onPick) {
   let items = [], hl = -1;
   const close = () => { box.hidden = true; box.innerHTML = ''; hl = -1; };
   const draw = () => {
     box.innerHTML = items.length ? items.map((it, i) => `<button type="button" data-i="${i}" class="${i === hl ? 'hl' : ''}">
-        <span><b>${h(it.name)}</b> <small>${h(it.size)}</small></span><small>${it.best ? 'from ' + money(it.best.price) : 'no prices yet'}</small></button>`).join('')
+        <span>${emojiFor(it.name, it.category)} <b>${h(it.name)}</b> <small>${h(it.size)}</small></span><small>${it.best ? 'from ' + money(it.best.price) : ''}</small></button>`).join('')
       : '<div class="empty" style="padding:12px">No match. Try another word.</div>';
     box.hidden = false;
   };
@@ -304,7 +649,7 @@ function attachSuggest(input, box, onPick) {
       if (input.value.trim() !== q) return;
       items = d.results; hl = items.length ? 0 : -1; draw();
     } catch { /* ignore */ }
-  }, 180);
+  }, 160);
   const pick = (i) => { const it = items[i]; if (!it) return; close(); input.value = ''; onPick(it); };
   input.addEventListener('input', () => { const q = input.value.trim(); if (q.length < 2) { close(); return; } fetchItems(q); });
   input.addEventListener('keydown', (e) => {
@@ -323,54 +668,59 @@ function renderCart() {
   const c = S.cart;
   const budget = c.mode === 'budget';
   view.innerHTML = `
-    <div class="page-head"><div><h1>My cart</h1><p class="muted">Add what you need. We work out where to buy each item so you pay the least.</p></div>
+    <div class="section-head" style="margin-top:6px"><div><h1>🛒 My cart</h1><p class="muted">We work out where to buy each item. Your total updates as you go.</p></div>
       ${c.lines.length ? '<button class="btn small" type="button" id="cart-clear">Clear cart</button>' : ''}</div>
-    <div class="mode" role="group" aria-label="Cart type">
-      <button type="button" data-mode="cheapest" aria-pressed="${!budget}"><b>🧮 Cheapest cart</b><span>Everything on your list for the lowest total price.</span></button>
-      <button type="button" data-mode="budget" aria-pressed="${budget}"><b>💰 Fit my budget</b><span>Set a budget and priorities. We fill the cart with what matters most.</span></button>
-    </div>
-    <div class="cart-layout">
-      <section class="panel" aria-labelledby="h-items">
-        <h2 id="h-items">1. What do you need?</h2>
-        <div class="addbox"><input type="search" id="add-q" placeholder="Add an item: bread, maize meal, soap…" autocomplete="off" aria-label="Add an item">
+    <div class="switch ${budget ? 'budget' : ''}" id="mode" role="group" aria-label="Cart type"><span class="pill"></span>
+      <button type="button" data-mode="cheapest" aria-pressed="${!budget}">🧮 Cheapest cart</button>
+      <button type="button" data-mode="budget" aria-pressed="${budget}">💰 Fit my budget</button></div>
+    ${budget ? `<section class="panel budget-card" id="budget-card">
+      <div class="gauge" id="gauge"><svg width="136" height="136" viewBox="0 0 136 136"><circle class="g-bg" cx="68" cy="68" r="58" stroke-width="14" fill="none"/>
+        <circle class="g-fg" id="g-fg" cx="68" cy="68" r="58" stroke-width="14" fill="none" stroke-linecap="round" stroke-dasharray="364.42" stroke-dashoffset="364.42"/></svg>
+        <div class="g-txt"><b id="g-spent">N$0</b><small id="g-of">of your budget</small></div></div>
+      <div style="width:100%"><small class="muted" style="font-weight:700">MY BUDGET</small><div class="budget-amount" id="b-amt">${money0(c.budget)}</div>
+        <input type="range" id="b-range" min="50" max="5000" step="10" value="${h(c.budget)}" aria-label="Budget">
+        <div class="chips">${[200, 500, 1000, 1500, 2500].map((v) => `<button class="chip" type="button" data-b="${v}">N$${v.toLocaleString('en-US')}</button>`).join('')}</div>
+        <p class="muted" style="font-size:.85rem;margin:.6rem 0 0">Give each item a priority. <b>Must have</b> items always go in; the rest are added in order until the money runs out.</p></div>
+    </section>` : ''}
+    <div class="cart-grid">
+      <section class="panel">
+        <div class="addbox"><span class="icon">➕</span><input type="search" id="add-q" placeholder="Add anything: bread, maize meal, soap…" autocomplete="off" aria-label="Add an item">
           <div class="suggest" id="add-suggest" hidden></div></div>
+        <div class="scroll-x quick" id="quick"></div>
         <details class="paste" ${c.lines.length ? '' : 'open'}><summary>📝 Type or paste a whole list</summary>
-          <textarea id="paste-text" placeholder="One item per line, e.g.&#10;2 x bread&#10;maize meal 10kg&#10;cooking oil&#10;18 eggs&#10;washing powder"></textarea>
-          <button class="btn" type="button" id="paste-go">Match items</button>
+          <textarea id="paste-text" placeholder="One per line, e.g.&#10;2 x bread&#10;maize meal 10kg&#10;cooking oil&#10;18 eggs&#10;washing powder"></textarea>
+          <button class="btn" type="button" id="paste-go">✨ Match my list</button>
           <div id="parsed"></div>
         </details>
         <ul class="lines" id="lines"></ul>
-        ${budget ? '<p class="muted" style="font-size:.82rem;margin:.6rem 0 0"><b>Must have</b> items are always bought. Others are added by priority until the budget runs out. Extra units count for less than the first one.</p>' : ''}
+        <details class="opts"><summary>⚙️ Shops &amp; travel</summary>
+          <div class="opt-title">Shops you can get to</div>
+          <div class="row" style="margin-bottom:6px"><button class="btn small" type="button" data-shops="all">All shops</button>
+            ${S.user && S.user.stores.length ? '<button class="btn small" type="button" data-shops="mine">My shops</button>' : ''}
+            <button class="btn small" type="button" data-shops="none">None</button></div>
+          <div class="store-toggles" id="cart-shops">${S.meta.stores.map((s) => `<button class="store-toggle" type="button" data-store="${h(s.id)}" aria-pressed="${!c.stores || c.stores.includes(s.id)}" title="${h(s.name)}">${logo(s.id)}</button>`).join('')}</div>
+          <div class="opt-title">How many shops will you visit?</div>
+          <div class="seg" id="max-stores">${[[0, 'Any'], [1, 'Just 1'], [2, 'Up to 2'], [3, 'Up to 3']].map(([v, t]) => `<button type="button" data-v="${v}" aria-pressed="${(c.maxStores || 0) === v}">${t}</button>`).join('')}</div>
+          <div class="opt-title">Travel cost per shop <span class="muted">(taxi or fuel)</span></div>
+          <div class="money-input" style="max-width:200px"><span>N$</span><input type="number" id="trip" min="0" max="5000" step="1" inputmode="decimal" value="${h(c.tripCost || 0)}"></div>
+        </details>
       </section>
-      <section class="panel" aria-labelledby="h-opts">
-        <h2 id="h-opts">2. Where and how?</h2>
-        <div class="opt-title">Shops you can get to</div>
-        <div class="row" style="margin-bottom:6px">
-          <button class="btn small" type="button" data-shops="all">All shops</button>
-          ${S.user && S.user.stores.length ? '<button class="btn small" type="button" data-shops="mine">My shops</button>' : ''}
-          <button class="btn small" type="button" data-shops="none">None</button>
-        </div>
-        <div class="store-toggles" id="cart-shops">${S.meta.stores.map((s) => `<button class="store-toggle" type="button" data-store="${h(s.id)}" aria-pressed="${!c.stores || c.stores.includes(s.id)}" title="${h(s.name)}"><img class="logo" src="/logos/${encodeURIComponent(s.id)}.svg" alt="${h(s.name)}"></button>`).join('')}</div>
-        <div class="opt-title">How many shops will you visit?</div>
-        <div class="seg" id="max-stores">${[[0, 'Any number'], [1, 'Just 1'], [2, 'Up to 2'], [3, 'Up to 3']].map(([v, t]) => `<button type="button" data-v="${v}" aria-pressed="${(c.maxStores || 0) === v}">${t}</button>`).join('')}</div>
-        <div class="field-row" style="margin-top:12px">
-          <label>Travel cost per shop <span class="muted">(taxi/fuel)</span>
-            <div class="money-input"><span>N$</span><input type="number" id="trip" min="0" max="5000" step="1" inputmode="decimal" value="${h(c.tripCost || 0)}"></div></label>
-          ${budget ? `<label>My budget
-            <div class="money-input"><span>N$</span><input type="number" id="budget" min="1" max="1000000" step="10" inputmode="decimal" value="${h(c.budget)}"></div></label>` : ''}
-        </div>
-        ${budget ? `<div class="chips" id="budget-quick" style="margin:-4px 0 12px">${[200, 500, 1000, 1500, 2500].map((v) => `<button class="chip" type="button" data-b="${v}">N$${v.toLocaleString('en-US')}</button>`).join('')}</div>` : ''}
-        <button class="btn primary big" type="button" id="build">${budget ? '💰 Build my budget cart' : '🧮 Find my cheapest cart'}</button>
-        <p class="form-error" id="build-error"></p>
-      </section>
-    </div>
-    <div class="result-wrap" id="result"></div>`;
+      <section class="result-col" id="result"></section>
+    </div>`;
 
-  // events
-  $$('.mode button').forEach((b) => b.onclick = () => { c.mode = b.dataset.mode; S.result = null; saveCart(); renderCart(); });
+  $('#mode').onclick = (e) => {
+    const b = e.target.closest('[data-mode]');
+    if (!b || b.dataset.mode === c.mode) return;
+    c.mode = b.dataset.mode; S.result = null; saveCart();
+    $('#mode').classList.toggle('budget', c.mode === 'budget');
+    setTimeout(renderCart, REDUCED ? 0 : 220);
+  };
   const clear = $('#cart-clear');
   if (clear) clear.onclick = () => { if (confirm('Remove everything from your cart?')) { Object.assign(c, { lines: [], listId: null, listName: '' }); S.result = null; saveCart(); renderCart(); } };
-  attachSuggest($('#add-q'), $('#add-suggest'), (it) => { addToCart({ item_id: it.id, name: it.name, size: it.size }, 1, true); drawLines(); });
+  attachSuggest($('#add-q'), $('#add-suggest'), (it) => {
+    addToCart({ item_id: it.id, name: it.name, size: it.size, category: it.category }, 1, { quiet: true, from: $('#add-q') });
+    drawLines(true); scheduleBuild(); loadLineDetails();
+  });
   $('#paste-go').onclick = parsePaste;
   $('#lines').addEventListener('click', onLineClick);
   $('#lines').addEventListener('change', onLineChange);
@@ -382,82 +732,109 @@ function renderCart() {
     sel = sel.includes(b.dataset.store) ? sel.filter((x) => x !== b.dataset.store) : [...sel, b.dataset.store];
     c.stores = sel.length === all.length ? null : sel;
     b.setAttribute('aria-pressed', !c.stores || c.stores.includes(b.dataset.store));
-    markStale();
+    pop(b); changed();
   };
   $$('[data-shops]').forEach((b) => b.onclick = () => {
     const k = b.dataset.shops;
     c.stores = k === 'all' ? null : k === 'none' ? [] : [...S.user.stores];
     $$('#cart-shops [data-store]').forEach((t) => t.setAttribute('aria-pressed', !c.stores || c.stores.includes(t.dataset.store)));
-    markStale();
+    changed();
   });
   $('#max-stores').onclick = (e) => {
     const b = e.target.closest('[data-v]');
     if (!b) return;
     c.maxStores = +b.dataset.v;
     $$('#max-stores button').forEach((x) => x.setAttribute('aria-pressed', x === b));
-    markStale();
+    changed();
   };
-  $('#trip').oninput = (e) => { c.tripCost = Math.max(0, +e.target.value || 0); markStale(); };
+  $('#trip').oninput = (e) => { c.tripCost = Math.max(0, +e.target.value || 0); changed(); };
   if (budget) {
-    $('#budget').oninput = (e) => { c.budget = Math.max(0, +e.target.value || 0); markStale(); };
-    $('#budget-quick').onclick = (e) => { const b = e.target.closest('[data-b]'); if (b) { c.budget = +b.dataset.b; $('#budget').value = c.budget; markStale(); } };
+    const range = $('#b-range');
+    const setFill = () => range.style.setProperty('--fill', `${(100 * (c.budget - 50)) / (5000 - 50)}%`);
+    setFill();
+    range.oninput = () => { c.budget = +range.value; $('#b-amt').textContent = money0(c.budget); setFill(); changed(); };
+    $('.budget-card .chips').onclick = (e) => {
+      const b = e.target.closest('[data-b]');
+      if (!b) return;
+      const from = c.budget; c.budget = +b.dataset.b; range.value = c.budget; setFill(); pop(b);
+      const el = $('#b-amt'); el.dataset.v = from; countTo(el, c.budget, money0);
+      changed();
+    };
   }
-  $('#build').onclick = buildCart;
-
-  drawLines();
+  drawQuick();
+  drawLines(false, true);
   loadLineDetails();
-  if (S.result) drawResult();
+  drawResult();
+  if (c.lines.length) build();
 }
 
-function markStale() {
-  saveCart();
-  if (S.result && !S.stale) { S.stale = true; drawResult(); }
+function drawQuick() {
+  const box = $('#quick');
+  if (!box) return;
+  const show = (bs) => {
+    box.innerHTML = '<span class="muted" style="font-size:.8rem;align-self:center;font-weight:700">Quick add:</span>' +
+      bs.map((b) => `<button class="chip" type="button" data-basket="${h(b.id)}">${b.emoji} ${h(b.name)}</button>`).join('');
+  };
+  if (S.baskets) show(S.baskets);
+  else api('/api/baskets').then((d) => { S.baskets = d.baskets; if (document.body.contains(box)) show(d.baskets); }).catch(() => {});
 }
 
-function drawLines() {
+function changed() { saveCart(); scheduleBuild(); }
+const scheduleBuild = debounce(() => build(), 350);
+
+function drawLines(animateLast, animateAll) {
   const c = S.cart;
   const el = $('#lines');
   if (!el) return;
   const budget = c.mode === 'budget';
   if (!c.lines.length) {
-    el.innerHTML = '<li class="empty"><b>Your cart is empty</b>Search above, paste a list, or add specials from the Specials page.</li>';
+    el.innerHTML = '<li class="empty"><span class="big-emoji">🧺</span><b>Your cart is empty</b>Search above, tap a quick basket, or add deals from the Deals page.</li>';
     updateCartCount();
     return;
   }
   el.innerHTML = c.lines.map((l) => {
     const det = S.items[l.item_id];
     const brands = det ? det.products : (l.product_id ? [{ id: l.product_id, brand: l.brand }] : []);
-    const opts = '<option value="">Any brand (cheapest)</option>' + brands.map((p) => `<option value="${h(p.id)}" ${p.id === l.product_id ? 'selected' : ''}>${h(p.brand)}</option>`).join('');
-    return `<li class="line" data-key="${h(l.key)}">
+    const opts = '<option value="">Any brand</option>' + brands.map((p) => `<option value="${h(p.id)}" ${p.id === l.product_id ? 'selected' : ''}>${h(p.brand)}</option>`).join('');
+    return `<li class="line" data-key="${h(l.key)}"><span class="em">${emojiFor(l.name, l.category || (det && det.category))}</span>
       <div class="line-name">${h(l.name)} <small>${h(l.size)}</small></div>
-      <button class="btn small danger" type="button" data-act="remove" aria-label="Remove ${h(l.name)}">✕</button>
+      <button class="x" type="button" data-act="remove" aria-label="Remove ${h(l.name)}">✕</button>
       <div class="line-ctrls">
         <div class="stepper"><button type="button" data-act="dec" aria-label="One less">−</button><span aria-live="polite">${l.qty}</span><button type="button" data-act="inc" aria-label="One more">+</button></div>
         <select data-act="brand" aria-label="Brand for ${h(l.name)}">${opts}</select>
         ${budget ? `<select data-act="prio" class="prio ${h(l.priority)}" aria-label="Priority for ${h(l.name)}">${PRIOS.map(([v, t]) => `<option value="${v}" ${l.priority === v ? 'selected' : ''}>${t}</option>`).join('')}</select>` : ''}
       </div></li>`;
   }).join('');
+  if (animateAll) reveal(el.children, { step: 0.03, y: 10 });
+  else if (animateLast) reveal([el.lastElementChild], { scale: 0.9 });
   updateCartCount();
 }
-
 async function loadLineDetails() {
   const missing = [...new Set(S.cart.lines.map((l) => l.item_id))].filter((id) => !S.items[id]);
   if (!missing.length) return;
   await Promise.allSettled(missing.map(itemDetail));
   if (S.view === 'cart') drawLines();
 }
-
 function lineFor(el) { const li = el.closest('[data-key]'); return li && S.cart.lines.find((l) => l.key === li.dataset.key); }
 function onLineClick(e) {
   const b = e.target.closest('[data-act]');
   if (!b || b.tagName === 'SELECT') return;
   const l = lineFor(b);
   if (!l) return;
+  const li = b.closest('.line');
+  if (b.dataset.act === 'remove') {
+    const done = () => { S.cart.lines = S.cart.lines.filter((x) => x !== l); drawLines(); changed(); };
+    const a = animate(li, { opacity: [1, 0], transform: ['translateX(0px)', 'translateX(40px)'] }, { duration: 0.22 });
+    if (a && a.then) a.then(done); else done();
+    return;
+  }
   if (b.dataset.act === 'inc') l.qty = Math.min(99, l.qty + 1);
   if (b.dataset.act === 'dec') l.qty = Math.max(1, l.qty - 1);
-  if (b.dataset.act === 'remove') S.cart.lines = S.cart.lines.filter((x) => x !== l);
-  drawLines();
-  markStale();
+  const span = $('.stepper span', li);
+  span.textContent = l.qty;
+  pop(span);
+  updateCartCount();
+  changed();
 }
 function onLineChange(e) {
   const l = lineFor(e.target);
@@ -468,7 +845,7 @@ function onLineChange(e) {
     l.brand = l.product_id && det ? (det.products.find((p) => p.id === l.product_id) || {}).brand : null;
   }
   if (e.target.dataset.act === 'prio') { l.priority = e.target.value; e.target.className = 'prio ' + l.priority; }
-  markStale();
+  changed();
 }
 
 async function parsePaste() {
@@ -480,11 +857,11 @@ async function parsePaste() {
   const lines = d.lines;
   out.innerHTML = `<div class="parsed">${lines.map((l, i) => {
     const choices = [l.item, ...l.alternatives].filter(Boolean);
-    return `<div><span style="min-width:2.2em;font-weight:700">${l.qty}×</span>
-      ${choices.length ? `<select data-i="${i}" aria-label="Match for ${h(l.text)}">${choices.map((c) => `<option value="${h(c.id)}">${h(c.name)} ${h(c.size)}</option>`).join('')}<option value="">Skip “${h(l.text)}”</option></select>`
-        : `<span class="muted">No match for “${h(l.text)}”. Try the search box.</span>`}</div>`;
-  }).join('')}</div>
-    <button class="btn green" type="button" id="paste-add">Add ${lines.filter((l) => l.item).length} items to cart</button>`;
+    return `<div><span style="min-width:2.4em;font-weight:800">${l.qty}×</span>
+      ${choices.length ? `<select data-i="${i}" aria-label="Match for ${h(l.text)}">${choices.map((c) => `<option value="${h(c.id)}">${emojiFor(c.name, c.category)} ${h(c.name)} ${h(c.size)}</option>`).join('')}<option value="">Skip “${h(l.text)}”</option></select>`
+        : `<span class="muted">No match for “${h(l.text)}”.</span>`}</div>`;
+  }).join('')}</div><button class="btn green" type="button" id="paste-add">＋ Add ${lines.filter((l) => l.item).length} items</button>`;
+  reveal($$('.parsed > div', out), { step: 0.04, y: 6 });
   $('#paste-add').onclick = () => {
     let n = 0;
     lines.forEach((l, i) => {
@@ -492,108 +869,134 @@ async function parsePaste() {
       const id = sel ? sel.value : '';
       if (!id) return;
       const choice = [l.item, ...l.alternatives].find((c) => c && c.id === id);
-      addToCart({ item_id: choice.id, name: choice.name, size: choice.size }, l.qty, true);
+      addToCart({ item_id: choice.id, name: choice.name, size: choice.size, category: choice.category }, l.qty, { quiet: true });
       n++;
     });
     toast(`Added ${n} item${n === 1 ? '' : 's'} to your cart`);
-    $('#paste-text').value = '';
-    out.innerHTML = '';
-    $('details.paste').open = false;
-    drawLines();
-    loadLineDetails();
+    $('#paste-text').value = ''; out.innerHTML = ''; $('details.paste').open = false;
+    drawLines(false, true); loadLineDetails(); changed();
   };
 }
 
-async function buildCart() {
+async function build() {
   const c = S.cart;
-  const err = $('#build-error');
-  err.textContent = '';
-  if (!c.lines.length) { err.textContent = 'Add some items first.'; return; }
-  if (c.stores && !c.stores.length) { err.textContent = 'Pick at least one shop.'; return; }
-  if (c.mode === 'budget' && !(c.budget > 0)) { err.textContent = 'Enter your budget.'; return; }
-  const btn = $('#build');
-  btn.disabled = true;
-  const label = btn.textContent;
-  btn.textContent = 'Working out the best cart…';
+  if (!c.lines.length) { S.result = null; drawResult(); return; }
+  if (c.stores && !c.stores.length) { S.result = { error: 'Pick at least one shop under ⚙️ Shops & travel.' }; drawResult(); return; }
+  const seq = ++S.buildSeq;
+  const sum = $('.summary');
+  if (sum) sum.classList.add('updating');
   try {
-    S.result = await api('/api/cart/optimize', { body: {
+    const r = await api('/api/cart/optimize', { body: {
       lines: c.lines.map((l) => ({ key: l.key, item_id: l.item_id, product_id: l.product_id, qty: l.qty, priority: c.mode === 'budget' ? l.priority : 'high' })),
-      stores: c.stores, max_stores: c.maxStores || null, trip_cost: +c.tripCost || 0,
-      budget: c.mode === 'budget' ? +c.budget : null,
+      stores: c.stores, max_stores: c.maxStores || null, trip_cost: +c.tripCost || 0, budget: c.mode === 'budget' ? +c.budget : null,
     } });
-    S.stale = false;
-    drawResult();
-    $('#result').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (seq !== S.buildSeq) return;
+    const prev = S.result;
+    S.result = r;
+    drawResult(prev);
   } catch (e) {
-    err.textContent = e.message;
-  } finally {
-    btn.disabled = false;
-    btn.textContent = label;
+    if (seq === S.buildSeq) { S.result = { error: e.message }; drawResult(); }
   }
 }
 
-function drawResult() {
-  const r = S.result;
+function drawResult(prev) {
   const el = $('#result');
-  if (!el || !r) return;
-  const lineName = (x) => `${x.brand ? h(x.brand) + ' ' : ''}${h(x.name)} <span class="muted">${h(x.size)}</span>`;
-  let html = '';
-  if (S.stale) html += '<div class="alert warn">Your list or options changed. Tap the build button again to update this plan.</div>';
-  if (r.status === 'over_budget') {
-    el.innerHTML = html + `<div class="alert bad"><b>Over budget.</b> ${h(r.message)}</div>`;
+  if (!el) return;
+  const r = S.result;
+  const c = S.cart;
+  if (!c.lines.length || !r) {
+    el.innerHTML = `<div class="panel empty"><span class="big-emoji">✨</span><b>Your best cart appears here</b>Add items and we'll find the cheapest way to buy them.
+      <div class="baskets" id="cart-baskets" style="margin-top:14px;text-align:left"></div></div>`;
+    loadBaskets($('#cart-baskets'));
+    updateGauge(0);
     return;
   }
+  if (r.error) { el.innerHTML = `<div class="callout warn">${h(r.error)}</div>`; return; }
+  if (r.status === 'over_budget') {
+    el.innerHTML = `<div class="callout bad"><b>😬 Over budget.</b> ${h(r.message)}</div>`;
+    updateGauge(r.must_cost, true);
+    animate(el.firstElementChild, { transform: ['translateX(0px)', 'translateX(-8px)', 'translateX(8px)', 'translateX(-4px)', 'translateX(0px)'] }, { duration: 0.4 });
+    return;
+  }
+  const budget = r.mode === 'budget';
   const nStores = r.stores.length;
-  const tiles = [
-    `<div class="tile hl"><small>${r.mode === 'budget' ? 'Cart total' : 'Cheapest total'}</small><b>${money(r.total)}</b>${r.travel ? `<span style="font-size:.8rem">incl. ${money(r.travel)} travel</span>` : `<span style="font-size:.8rem">${r.items_bought} item${r.items_bought === 1 ? '' : 's'}</span>`}</div>`,
-    `<div class="tile good"><small>Specials save you</small><b>${money(r.special_savings)}</b></div>`,
-    `<div class="tile"><small>Shops to visit</small><b>${nStores}</b></div>`,
-  ];
-  if (r.mode === 'budget') tiles.push(`<div class="tile ${r.budget_left >= 0 ? 'good' : ''}"><small>Left from ${money(r.budget)}</small><b>${money(r.budget_left)}</b></div>`);
-  else if (r.saving_vs_best_single > 0.005) tiles.push(`<div class="tile good"><small>vs all at ${h(r.best_single.store_name)}</small><b>${money(r.saving_vs_best_single)}</b><span style="font-size:.8rem">cheaper</span></div>`);
-  html += `<h2>Your best cart</h2><div class="tiles">${tiles.join('')}</div>`;
+  const lineName = (x) => `${x.brand ? h(x.brand) + ' ' : ''}${h(x.name)} <span class="muted">${h(x.size)}</span>`;
+  const sameShops = prev && prev.stores && prev.stores.map((s) => s.store_id).join() === r.stores.map((s) => s.store_id).join();
+  let note = '';
+  if (budget) note = r.left_out.length ? `${r.left_out.length} item${r.left_out.length === 1 ? '' : 's'} didn't fit. See below.` : '🎉 Everything fits your budget!';
+  else if (r.saving_vs_best_single > 0.005) note = `💡 ${money(r.saving_vs_best_single)} cheaper than buying everything at ${h(r.best_single.store_name)}.`;
+  else if (nStores === 1) note = `🏆 ${h(r.stores[0].store_name)} is the cheapest for your whole list.`;
 
-  if (r.mode === 'budget' && !r.left_out.length && r.status !== 'empty') html += '<div class="alert ok">Everything on your list fits your budget.</div>';
-  if (r.left_out.length) html += `<div class="alert warn"><b>${r.left_out.length} item${r.left_out.length === 1 ? '' : 's'} didn't fit your budget.</b> See the list below.</div>`;
-  if (r.not_covered.length) html += `<div class="alert warn"><b>Not available within ${r.max_stores} shop${r.max_stores === 1 ? '' : 's'}:</b> ${r.not_covered.map((x) => h(x.name + ' ' + x.size)).join(', ')}. Allow more shops to include them.</div>`;
-  if (r.unavailable.length) html += `<div class="alert warn"><b>Not sold at your selected shops:</b> ${r.unavailable.map((x) => h(x.name + ' ' + x.size) + (x.brand ? ` (${h(x.brand)})` : '')).join(', ')}. Try “Any brand” or more shops.</div>`;
-
+  let html = `<div class="summary" id="summary"><small>${budget ? 'Your budget cart' : 'Cheapest total'}</small>
+      <div class="total" id="sum-total">${money(prev && prev.total ? prev.total : 0)}</div>
+      <div class="sum-stats">
+        <div><small>Specials save</small><b id="sum-save">${money(prev && prev.special_savings ? prev.special_savings : 0)}</b></div>
+        <div><small>Shops</small><b>${nStores}</b></div>
+        <div><small>${budget ? 'Left over' : 'Items'}</small><b id="sum-3">${budget ? money(r.budget_left) : r.items_bought}</b></div>
+      </div>
+      ${note ? `<div class="sum-note">${note}</div>` : ''}
+      ${r.travel ? `<div class="sum-note">Includes ${money(r.travel)} travel.</div>` : ''}
+    </div>`;
+  if (r.not_covered.length) html += `<div class="callout warn"><b>Not available within ${r.max_stores} shop${r.max_stores === 1 ? '' : 's'}:</b> ${r.not_covered.map((x) => h(x.name)).join(', ')}. Allow more shops to include them.</div>`;
+  if (r.unavailable.length) html += `<div class="callout warn"><b>Not sold at your selected shops:</b> ${r.unavailable.map((x) => h(x.name) + (x.brand ? ` (${h(x.brand)})` : '')).join(', ')}. Try “Any brand” or more shops.</div>`;
+  if (nStores) {
+    html += `<div class="plans" id="plans">${r.stores.map((s) => `
+      <section class="plan"><div class="plan-head">${logo(s.store_id, 'lg')}<div style="text-align:right"><b>${money(s.subtotal)}</b>${s.savings ? `<div class="tag good">saves ${money(s.savings)}</div>` : ''}</div></div>
+        <ul>${s.items.map((x) => `<li><input type="checkbox" aria-label="Got ${h(x.name)}"><span class="em">${emojiFor(x.name, x.category)}</span><div><div class="pl-name">${x.qty} × ${lineName(x)}</div>
+          <div class="pl-sub">${x.on_special ? `<span class="tag special">${h(x.special_label || 'Special')}</span> ${h(until(x.valid_until))}` : `${money(x.unit_price)} each`}${x.source === 'sample' ? ' · sample' : ''}</div></div>
+          <div class="pl-price">${money(x.line_total)}${x.on_special && x.saving > 0 ? `<small><s>${money(x.regular_price * x.qty)}</s></small>` : ''}</div></li>`).join('')}</ul></section>`).join('')}</div>`;
+  }
+  if (r.left_out.length) {
+    html += `<div class="panel leftout"><h3 style="margin-top:0">Didn't fit your budget</h3><ul>${r.left_out.map((x) => `<li><span>${emojiFor(x.name, x.category)} ${x.wanted - x.bought} × ${h(x.name)} <span class="muted">${h(x.size)}</span></span>
+      <span class="tag">+${money(x.extra_needed)}</span></li>`).join('')}</ul></div>`;
+  }
   if (r.comparison.length) {
     const max = Math.max(...r.comparison.map((x) => x.total), r.items_total);
-    const cheapest = r.comparison[0];
-    html += `<h3>${r.mode === 'budget' ? 'Your full list at each shop' : 'What your list costs at each shop'}</h3><div class="bars">
-      ${nStores > 1 || r.mode === 'budget' ? `<div class="bar smart"><div style="font-weight:800;font-size:.8rem">This plan</div><div class="bar-track"><div class="bar-fill" style="width:${(100 * r.items_total / max).toFixed(1)}%"></div><span class="bar-label">${nStores} shop${nStores === 1 ? '' : 's'}</span></div><div class="bar-val">${money(r.items_total)}</div></div>` : ''}
-      ${r.comparison.slice(0, 12).map((x) => `<div class="bar ${x === cheapest ? 'cheapest' : ''}">${logo(x.store_id)}<div class="bar-track"><div class="bar-fill" style="width:${(100 * x.total / max).toFixed(1)}%"></div>${x === cheapest ? '<span class="bar-label">cheapest single shop</span>' : ''}</div>
-        <div class="bar-val">${money(x.total)}${x.missing ? `<small>${x.missing} item${x.missing === 1 ? '' : 's'} missing</small>` : ''}</div></div>`).join('')}
-    </div><p class="muted" style="font-size:.8rem">Shop totals are for the items each shop stocks, before travel costs.</p>`;
+    html += `<details class="panel bars-wrap" ${prev ? '' : ''}><summary style="cursor:pointer;font-weight:800">📊 ${budget ? 'Your full list at each shop' : 'Compare shops'}</summary><div class="bars" style="margin-top:12px">
+      <div class="bar smart"><span class="bar-name">This plan</span><div class="bar-track"><div class="bar-fill" style="width:${(100 * r.items_total / max).toFixed(1)}%"></div><span class="bar-label">${nStores} shop${nStores === 1 ? '' : 's'}</span></div><div class="bar-val">${money(r.items_total)}</div></div>
+      ${r.comparison.slice(0, 12).map((x, i) => `<div class="bar ${i === 0 ? 'cheapest' : ''}">${logo(x.store_id)}<div class="bar-track"><div class="bar-fill" style="width:${(100 * x.total / max).toFixed(1)}%"></div>${i === 0 ? '<span class="bar-label">cheapest single shop</span>' : ''}</div>
+        <div class="bar-val">${money(x.total)}${x.missing ? `<small>${x.missing} missing</small>` : ''}</div></div>`).join('')}
+    </div><p class="muted" style="font-size:.78rem;margin-bottom:0">Totals for the items each shop stocks, before travel.</p></details>`;
   }
-
-  if (nStores) {
-    html += `<h3>Your shopping plan</h3><div class="plans">${r.stores.map((s) => `
-      <section class="plan"><div class="plan-head">${logo(s.store_id, 'lg')}<div style="text-align:right"><b>${money(s.subtotal)}</b>${s.savings ? `<div class="tag good">saves ${money(s.savings)}</div>` : ''}</div></div>
-        <ul>${s.items.map((x) => `<li><input type="checkbox" aria-label="Got ${h(x.name)}"><div><div class="pl-name">${x.qty} × ${lineName(x)}</div>
-          <div class="pl-sub">${x.on_special ? `<span class="tag special">${h(x.special_label || 'Special')}</span> ${h(until(x.valid_until))}` : `${money(x.unit_price)} each`}${x.source === 'sample' ? ' · sample price' : ''}</div></div>
-          <div class="pl-price">${money(x.line_total)}${x.on_special ? `<small><s>${money(x.regular_price * x.qty)}</s></small>` : ''}</div></li>`).join('')}</ul></section>`).join('')}</div>`;
-  }
-
-  if (r.left_out.length) {
-    html += `<h3>Didn't fit your budget</h3><div class="panel leftout"><ul>${r.left_out.map((x) => `<li><span>${x.wanted - x.bought} × ${h(x.name)} <span class="muted">${h(x.size)}</span> <span class="tag">${h((PRIOS.find((p) => p[0] === x.priority) || [, ''])[1])}</span></span>
-      <span class="muted">about ${money(x.extra_needed)} more</span></li>`).join('')}</ul></div>`;
-  }
-
   html += `<div class="actions">
-      <button class="btn primary" type="button" id="save-list">💾 ${S.cart.listId ? 'Update saved list' : 'Save this list'}</button>
-      <a class="btn green" id="wa" target="_blank" rel="noopener">📲 Send to WhatsApp</a>
+      <button class="btn primary" type="button" id="save-list">💾 ${c.listId ? 'Update saved list' : 'Save list'}</button>
+      <a class="btn green" id="wa" target="_blank" rel="noopener">📲 WhatsApp</a>
       <button class="btn" type="button" id="copy-plan">📋 Copy</button>
-      <button class="btn" type="button" onclick="window.print()">🖨️ Print</button>
+      <button class="btn" type="button" id="print-plan">🖨️ Print</button>
     </div><div id="save-box"></div>`;
   el.innerHTML = html;
+
+  countTo($('#sum-total'), r.total, money);
+  countTo($('#sum-save'), r.special_savings, money);
+  updateGauge(r.total, false);
+  if (!sameShops) reveal($$('#plans .plan'), { step: 0.08, y: 20 });
+  const bw = $('.bars-wrap');
+  if (bw) bw.addEventListener('toggle', () => { if (bw.open) animate($$('.bar-fill', bw), { transform: ['scaleX(0)', 'scaleX(1)'] }, { duration: 0.7, delay: MO ? MO.stagger(0.04) : 0, ease: EASE }); });
   $('#wa').href = 'https://wa.me/?text=' + encodeURIComponent(planText(r));
-  $('#copy-plan').onclick = async () => {
-    try { await navigator.clipboard.writeText(planText(r)); toast('Shopping plan copied'); } catch { toast("Couldn't copy. Try Print instead."); }
-  };
+  $('#copy-plan').onclick = async () => { try { await navigator.clipboard.writeText(planText(r)); toast('Shopping plan copied'); } catch { toast("Couldn't copy. Try Print instead."); } };
+  $('#print-plan').onclick = () => window.print();
   $('#save-list').onclick = saveListPrompt;
-  el.querySelectorAll('.plan input[type=checkbox]').forEach((cb) => cb.onchange = () => cb.closest('li').classList.toggle('done', cb.checked));
+  $$('.plan input[type=checkbox]', el).forEach((cb) => cb.onchange = () => { cb.closest('li').classList.toggle('done', cb.checked); if (cb.checked) pop(cb.closest('li').querySelector('.em')); });
+
+  const fitsNow = budget && !r.left_out.length;
+  const fitsBefore = prev && prev.mode === 'budget' && prev.left_out && !prev.left_out.length;
+  if (S.celebrate || (fitsNow && prev && !fitsBefore)) { S.celebrate = false; setTimeout(() => confettiFrom($('#summary')), 150); }
+}
+
+function updateGauge(spent, over) {
+  const fg = $('#g-fg');
+  if (!fg) return;
+  const b = S.cart.budget || 1;
+  const frac = Math.min(1, spent / b);
+  const C = 364.42;
+  const to = C * (1 - frac);
+  const from = parseFloat(fg.getAttribute('stroke-dashoffset')) || C;
+  $('#gauge').classList.toggle('over', !!over || spent > b);
+  if (MO && !REDUCED) {
+    try { MO.animate(from, to, { duration: 0.9, ease: EASE, onUpdate: (v) => fg.setAttribute('stroke-dashoffset', v) }); } catch { fg.setAttribute('stroke-dashoffset', to); }
+  } else fg.setAttribute('stroke-dashoffset', to);
+  countTo($('#g-spent'), spent, money0);
+  $('#g-of').textContent = over ? 'must-haves need' : `of ${money0(b)}`;
 }
 
 function planText(r) {
@@ -611,15 +1014,15 @@ function saveListPrompt() {
   if (!S.user) { openAuth('login', 'Sign in to save your lists.'); return; }
   const box = $('#save-box');
   const def = S.cart.listName || `Shopping ${fmtDate(S.meta.today, { day: 'numeric', month: 'short' })}`;
-  box.innerHTML = `<form class="row" id="save-form" style="margin-top:10px;max-width:520px"><input id="list-name" maxlength="60" value="${h(def)}" aria-label="List name" style="flex:1">
+  box.innerHTML = `<form class="row" id="save-form" style="margin-top:10px"><input id="list-name" maxlength="60" value="${h(def)}" aria-label="List name" style="flex:1;min-width:160px">
     <button class="btn primary" type="submit">Save</button>${S.cart.listId ? '<button class="btn" type="button" id="save-new">Save as new</button>' : ''}</form>`;
+  reveal([box.firstElementChild], { y: 8 });
   const doSave = async (asNew) => {
     const name = $('#list-name').value.trim() || def;
     const c = S.cart;
     const data = { lines: c.lines, mode: c.mode, budget: c.budget, maxStores: c.maxStores, tripCost: c.tripCost, stores: c.stores, total: S.result ? S.result.total : null };
     try {
-      const saved = c.listId && !asNew ? await api('/api/lists/' + c.listId, { method: 'PUT', body: { name, data } })
-        : await api('/api/lists', { body: { name, data } });
+      const saved = c.listId && !asNew ? await api('/api/lists/' + c.listId, { method: 'PUT', body: { name, data } }) : await api('/api/lists', { body: { name, data } });
       c.listId = saved.id; c.listName = saved.name; saveCart();
       box.innerHTML = '';
       $('#save-list').textContent = '💾 Update saved list';
@@ -632,27 +1035,89 @@ function saveListPrompt() {
   $('#list-name').focus();
 }
 
-// ------------------------------------------------------------------ lists view
-function needSignIn(title, why) {
-  view.innerHTML = `<div class="page-head"><div><h1>${h(title)}</h1></div></div>
-    <div class="panel empty"><b>Sign in to use this</b>${h(why)}<div style="margin-top:12px" class="row" ><span style="flex:1"></span>
-    <button class="btn primary" type="button" data-signin>Sign in</button><button class="btn" type="button" data-register>Create a free account</button><span style="flex:1"></span></div></div>`;
+// ------------------------------------------------------------------ me: account, lists, reports, admin
+async function renderMe() {
+  if (!S.user) {
+    view.innerHTML = `<section class="hero" style="grid-template-columns:1fr"><div><h1>Join Smart Basket 👋</h1>
+      <p class="hero-sub">A free account keeps your lists, your shops and your savings in one place.</p>
+      <div class="row"><button class="btn gold big" type="button" data-register>Create a free account</button><button class="btn big" type="button" data-signin>Sign in</button></div></div></section>
+      <div class="benefits"><div><span>💾</span>Save shopping lists and budgets</div><div><span>🏪</span>Pick the shops near you</div>
+      <div><span>📣</span>Share specials you spot in store</div><div><span>📲</span>Send plans to WhatsApp</div></div>
+      <div class="section-head"><div><h2>📣 Specials spotted by shoppers</h2></div></div><div class="feed" id="recent"></div>`;
+    reveal($$('.benefits > div'), { step: 0.08 });
+    loadRecent();
+    return;
+  }
+  const u = S.user;
+  const ini = u.name.split(' ').map((p) => p[0]).slice(0, 2).join('').toUpperCase();
+  view.innerHTML = `<div class="me-hero"><span class="avatar">${h(ini)}</span><div style="flex:1"><h1 style="margin:0">Hi, ${h(u.name.split(' ')[0])}!</h1>
+      <span class="muted">${h(u.email)}${u.town ? ' · ' + h(u.town) : ''}${u.is_admin ? ' · admin' : ''}</span></div>
+      <button class="btn green" type="button" id="share-special">📣 Share a special</button><button class="btn" type="button" id="logout">Sign out</button></div>
+    <div class="two">
+      <div class="stack">
+        <section class="panel"><h2>📋 My saved lists</h2><div class="cards" id="lists"><div class="sk" style="min-height:120px"></div></div></section>
+        <section class="panel"><h2>📣 Specials spotted by shoppers</h2><div class="feed" id="recent"></div></section>
+      </div>
+      <div class="stack">
+        <form class="panel" id="myshops"><h2>🏪 My shops</h2><p class="muted" style="margin-top:-6px">Shops you can get to. “My shops” in the cart uses these.</p>
+          <div class="store-toggles">${S.meta.stores.map((s) => `<button class="store-toggle" type="button" data-store="${h(s.id)}" aria-pressed="${u.stores.includes(s.id)}" title="${h(s.name)}">${logo(s.id)}</button>`).join('')}</div>
+          <button class="btn primary" type="submit" style="margin-top:12px">Save my shops</button></form>
+        <form class="panel" id="profile"><h2>👤 Profile</h2>
+          <label>Name<input name="name" maxlength="60" value="${h(u.name)}"></label>
+          <label>Town<input name="town" maxlength="60" list="towns" value="${h(u.town)}"></label>
+          <button class="btn primary" type="submit">Save</button></form>
+        <form class="panel" id="pw"><h2>🔑 Password</h2>
+          <label>Current password<input type="password" name="old" autocomplete="current-password"></label>
+          <label>New password<input type="password" name="new" autocomplete="new-password" minlength="8"></label>
+          <button class="btn" type="submit">Change password</button></form>
+        <div class="panel"><h2>🗑️ Delete account</h2><p class="muted">Removes your account and saved lists. Specials you shared stay, without your name.</p>
+          <button class="btn danger" type="button" id="del-acc">Delete my account</button></div>
+      </div>
+    </div>
+    <div id="admin"></div>`;
+  reveal($$('.panel', view), { step: 0.05 });
+  const picked = new Set(u.stores);
+  $('#myshops .store-toggles').onclick = (e) => {
+    const b = e.target.closest('[data-store]');
+    if (!b) return;
+    picked.has(b.dataset.store) ? picked.delete(b.dataset.store) : picked.add(b.dataset.store);
+    b.setAttribute('aria-pressed', picked.has(b.dataset.store)); pop(b);
+  };
+  $('#myshops').onsubmit = async (e) => { e.preventDefault(); try { S.user = await api('/api/me', { method: 'PATCH', body: { stores: [...picked] } }); toast('Your shops are saved'); } catch (x) { toast(x.message); } };
+  $('#profile').onsubmit = async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    try { S.user = await api('/api/me', { method: 'PATCH', body: { name: f.get('name'), town: f.get('town') } }); renderAccountButton(); toast('Profile saved'); } catch (x) { toast(x.message); }
+  };
+  $('#pw').onsubmit = async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    try { await api('/api/me/password', { body: { old: f.get('old'), new: f.get('new') } }); e.target.reset(); toast('Password changed'); } catch (x) { toast(x.message); }
+  };
+  $('#logout').onclick = async () => { await api('/api/auth/logout', { body: {} }).catch(() => {}); S.user = null; renderAccountButton(); toast('Signed out'); location.hash = '#/deals'; };
+  $('#del-acc').onclick = async () => {
+    if (!confirm('Delete your account and saved lists? This cannot be undone.')) return;
+    try { await api('/api/me', { method: 'DELETE' }); S.user = null; renderAccountButton(); toast('Account deleted'); location.hash = '#/deals'; } catch (x) { toast(x.message); }
+  };
+  $('#share-special').onclick = openReport;
+  loadLists();
+  loadRecent();
+  if (u.is_admin) renderAdmin($('#admin'));
 }
 
-async function renderLists() {
-  if (!S.user) { needSignIn('My lists', 'Save shopping lists and budgets, then reload them any week to see the latest best cart.'); return; }
-  view.innerHTML = '<div class="page-head"><div><h1>My lists</h1><p class="muted">Open a saved list to rebuild it with this week\'s prices.</p></div></div><div class="cards" id="lists"><div class="loading">Loading…</div></div>';
+async function loadLists() {
   let d;
   try { d = await api('/api/lists'); } catch (e) { $('#lists').innerHTML = `<div class="empty">${h(e.message)}</div>`; return; }
   const el = $('#lists');
   if (!el) return;
   el.innerHTML = d.lists.length ? d.lists.map((l) => {
     const items = (l.data.lines || []).length;
-    return `<article class="card" data-id="${l.id}"><div class="row between"><b>${h(l.name)}</b><span class="tag">${l.data.mode === 'budget' ? 'Budget ' + money(l.data.budget) : 'Cheapest'}</span></div>
-      <div class="muted" style="font-size:.85rem">${items} item${items === 1 ? '' : 's'}${l.data.total ? ' · last total ' + money(l.data.total) : ''} · saved ${h(fmtDate(l.updated_at))}</div>
-      <div class="muted" style="font-size:.85rem">${h((l.data.lines || []).slice(0, 6).map((x) => x.name).join(', '))}${items > 6 ? '…' : ''}</div>
-      <div class="row" style="margin-top:auto"><button class="btn primary small" type="button" data-open>Open in cart</button><button class="btn small danger" type="button" data-del>Delete</button></div></article>`;
-  }).join('') : '<div class="panel empty" style="grid-column:1/-1"><b>No saved lists yet</b>Build a cart and tap “Save this list”.</div>';
+    return `<article class="card" data-id="${l.id}"><div class="row between"><b>${h(l.name)}</b><span class="tag">${l.data.mode === 'budget' ? '💰 ' + money0(l.data.budget) : '🧮 Cheapest'}</span></div>
+      <div style="font-size:1.3rem">${(l.data.lines || []).slice(0, 8).map((x) => emojiFor(x.name, x.category)).join(' ')}</div>
+      <div class="muted" style="font-size:.82rem">${items} item${items === 1 ? '' : 's'}${l.data.total ? ' · last total ' + money(l.data.total) : ''} · ${h(fmtDate(l.updated_at))}</div>
+      <div class="row"><button class="btn primary small" type="button" data-open>Open in cart</button><button class="btn small danger" type="button" data-del>Delete</button></div></article>`;
+  }).join('') : '<div class="empty" style="grid-column:1/-1"><span class="big-emoji">📝</span><b>No saved lists yet</b>Build a cart and tap “Save list”.</div>';
+  reveal(el.children, { step: 0.05 });
   el.onclick = async (e) => {
     const card = e.target.closest('[data-id]');
     if (!card) return;
@@ -663,38 +1128,33 @@ async function renderLists() {
       S.result = null; saveCart();
       location.hash = '#/cart';
     } else if (e.target.closest('[data-del]') && confirm(`Delete “${l.name}”?`)) {
-      try { await api('/api/lists/' + l.id, { method: 'DELETE' }); if (S.cart.listId === l.id) { S.cart.listId = null; saveCart(); } renderLists(); } catch (err) { toast(err.message); }
+      try { await api('/api/lists/' + l.id, { method: 'DELETE' }); if (S.cart.listId === l.id) { S.cart.listId = null; saveCart(); } loadLists(); } catch (err) { toast(err.message); }
     }
   };
 }
 
-// ------------------------------------------------------------------ report a special
-async function renderReport() {
-  view.innerHTML = `<div class="page-head"><div><h1>Report a special</h1><p class="muted">Saw a good price in a shop or leaflet? Share it so other shoppers save too.</p></div></div>
-    <div class="two"><div id="report-form"></div><div><h2>Recently reported</h2><div class="feed" id="recent"><div class="loading">Loading…</div></div></div></div>`;
-  const formBox = $('#report-form');
-  if (!S.user) {
-    formBox.innerHTML = `<div class="panel empty"><b>Sign in to report specials</b>A free account lets you report specials, save lists and choose your shops.
-      <div class="row" style="justify-content:center;margin-top:12px"><button class="btn primary" type="button" data-signin>Sign in</button><button class="btn" type="button" data-register>Create account</button></div></div>`;
-  } else drawReportForm(formBox);
+async function loadRecent() {
   try {
-    const d = await api('/api/reports/recent?limit=20');
+    const d = await api('/api/reports/recent?limit=12');
     const el = $('#recent');
     if (!el) return;
     el.innerHTML = d.reports.length ? d.reports.map((r) => `<div class="feed-item">${logo(r.store_id, 'sm')}
-      <div><b>${h(r.brand)} ${h(r.name)}</b> <span class="muted">${h(r.size)}</span><div class="muted" style="font-size:.8rem">${h(r.label || 'Special')} · until ${h(fmtDate(r.valid_until))} · by ${h(r.reporter)}${r.branch ? ' · ' + h(r.branch) : ''}</div></div>
+      <div><b>${h(r.brand)} ${h(r.name)}</b> <span class="muted">${h(r.size)}</span><div class="muted" style="font-size:.78rem">${h(r.label || 'Special')} · until ${h(fmtDate(r.valid_until))} · 👋 ${h(r.reporter)}${r.branch ? ' · ' + h(r.branch) : ''}</div></div>
       <div class="price" style="text-align:right"><b style="color:var(--red)">${money(r.special_price)}</b>${r.price ? `<br><s class="was">${money(r.price)}</s>` : ''}</div></div>`).join('')
-      : '<div class="panel empty"><b>No reports yet</b>Be the first to share a special.</div>';
+      : '<div class="empty"><b>No specials shared yet</b>Spotted a bargain? Share it!</div>';
+    reveal(el.children, { step: 0.04, y: 8 });
   } catch { /* ignore */ }
 }
 
-function drawReportForm(box) {
+function openReport() {
+  if (!S.user) { openAuth('login', 'Sign in to share specials.'); return; }
+  const box = $('#report-body');
   const st = { store: null, item: null };
-  box.innerHTML = `<form class="panel" id="rep" novalidate>
-    <div class="opt-title">Shop</div>
-    <div class="store-toggles pick" id="rep-shops" role="group" aria-label="Shop">${S.meta.stores.map((s) => `<button class="store-toggle" type="button" data-store="${h(s.id)}" aria-pressed="false" title="${h(s.name)}"><img class="logo" src="/logos/${encodeURIComponent(s.id)}.svg" alt="${h(s.name)}"></button>`).join('')}</div>
+  box.innerHTML = `<form id="rep" novalidate>
+    <div class="opt-title" style="margin-top:0">Shop</div>
+    <div class="store-toggles pick" id="rep-shops" role="group" aria-label="Shop">${S.meta.stores.map((s) => `<button class="store-toggle" type="button" data-store="${h(s.id)}" aria-pressed="false" title="${h(s.name)}">${logo(s.id)}</button>`).join('')}</div>
     <label style="margin-top:12px">Product
-      <div class="addbox"><input type="search" id="rep-q" placeholder="Search: maize meal, Sunfoil…" autocomplete="off"><div class="suggest" id="rep-suggest" hidden></div></div>
+      <div class="addbox"><span class="icon">🔎</span><input type="search" id="rep-q" placeholder="Search: maize meal, Sunfoil…" autocomplete="off"><div class="suggest" id="rep-suggest" hidden></div></div>
       <div id="rep-picked"></div></label>
     <div id="rep-brand"></div>
     <div class="field-row">
@@ -707,18 +1167,19 @@ function drawReportForm(box) {
     </div>
     <label>Branch / town <span class="muted">(optional)</span><input id="rep-branch" maxlength="60" list="towns" value="${h(S.user.town || '')}"></label>
     <p class="form-error" id="rep-error" role="alert"></p>
-    <button class="btn primary big" type="submit">📣 Share this special</button></form>`;
+    <button class="btn green big wide" type="submit">📣 Share this special</button></form>`;
   $('#rep-shops').onclick = (e) => {
     const b = e.target.closest('[data-store]');
     if (!b) return;
     st.store = b.dataset.store;
     $$('#rep-shops [data-store]').forEach((x) => x.setAttribute('aria-pressed', x === b));
+    pop(b);
   };
   attachSuggest($('#rep-q'), $('#rep-suggest'), async (it) => {
     st.item = it;
-    $('#rep-picked').innerHTML = `<div class="picked"><span>${h(it.name)} <span class="muted">${h(it.size)}</span></span><button class="btn small" type="button" id="rep-unpick">Change</button></div>`;
-    $('#rep-q').hidden = true;
-    $('#rep-unpick').onclick = () => { st.item = null; $('#rep-picked').innerHTML = ''; $('#rep-brand').innerHTML = ''; $('#rep-q').hidden = false; $('#rep-q').focus(); };
+    $('#rep-picked').innerHTML = `<div class="picked"><span>${emojiFor(it.name, it.category)} ${h(it.name)} <span class="muted">${h(it.size)}</span></span><button class="btn small" type="button" id="rep-unpick">Change</button></div>`;
+    $('#rep-q').closest('.addbox').hidden = true;
+    $('#rep-unpick').onclick = () => { st.item = null; $('#rep-picked').innerHTML = ''; $('#rep-brand').innerHTML = ''; $('#rep-q').closest('.addbox').hidden = false; $('#rep-q').focus(); };
     const det = await itemDetail(it.id);
     $('#rep-brand').innerHTML = `<label>Brand<select id="rep-brand-sel">${det.products.map((p) => `<option value="${h(p.id)}">${h(p.brand)}</option>`).join('')}<option value="__other">Other brand…</option></select></label>
       <label id="rep-other" hidden>Brand name<input id="rep-other-in" maxlength="40"></label>`;
@@ -740,85 +1201,55 @@ function drawReportForm(box) {
     else { body.item_id = st.item.id; body.brand = ($('#rep-other-in') || {}).value || ''; }
     try {
       await api('/api/reports', { body });
-      toast('Thanks! Your special is live.');
+      $('#report-dialog').close();
+      confetti();
+      toast('🎉 Thanks! Your special is live.');
       delete S.items[st.item.id];
-      renderReport();
+      if (S.view === 'me') loadRecent();
     } catch (ex) { err.textContent = ex.message; }
   };
+  $('#report-dialog').showModal();
 }
 
-// ------------------------------------------------------------------ account
-function renderAccountPage() {
-  if (!S.user) { needSignIn('My account', 'Create a free account to save lists, choose your shops and report specials.'); return; }
-  const u = S.user;
-  view.innerHTML = `<div class="page-head"><div><h1>My account</h1><p class="muted">${h(u.email)}${u.is_admin ? ' · admin' : ''}</p></div>
-      <button class="btn" type="button" id="logout">Sign out</button></div>
-    <div class="two">
-      <form class="panel" id="profile"><h2>Profile</h2>
-        <label>Name<input name="name" maxlength="60" value="${h(u.name)}"></label>
-        <label>Town<input name="town" maxlength="60" list="towns" value="${h(u.town)}"></label>
-        <button class="btn primary" type="submit">Save</button></form>
-      <form class="panel" id="myshops"><h2>My shops</h2><p class="muted" style="margin-top:-6px">Shops you can get to. “My shops” in the cart uses these.</p>
-        <div class="store-toggles">${S.meta.stores.map((s) => `<button class="store-toggle" type="button" data-store="${h(s.id)}" aria-pressed="${u.stores.includes(s.id)}" title="${h(s.name)}"><img class="logo" src="/logos/${encodeURIComponent(s.id)}.svg" alt="${h(s.name)}"></button>`).join('')}</div>
-        <button class="btn primary" type="submit" style="margin-top:12px">Save my shops</button></form>
-      <form class="panel" id="pw"><h2>Change password</h2>
-        <label>Current password<input type="password" name="old" autocomplete="current-password"></label>
-        <label>New password<input type="password" name="new" autocomplete="new-password" minlength="8"></label>
-        <button class="btn" type="submit">Change password</button></form>
-      <div class="panel"><h2>Delete account</h2><p class="muted">Removes your account and saved lists. Specials you reported stay, without your name.</p>
-        <button class="btn danger" type="button" id="del-acc">Delete my account</button></div>
-    </div>`;
-  const picked = new Set(u.stores);
-  $('#myshops .store-toggles').onclick = (e) => {
-    const b = e.target.closest('[data-store]');
-    if (!b) return;
-    picked.has(b.dataset.store) ? picked.delete(b.dataset.store) : picked.add(b.dataset.store);
-    b.setAttribute('aria-pressed', picked.has(b.dataset.store));
-  };
-  $('#myshops').onsubmit = async (e) => { e.preventDefault(); try { S.user = await api('/api/me', { method: 'PATCH', body: { stores: [...picked] } }); toast('Your shops are saved'); } catch (x) { toast(x.message); } };
-  $('#profile').onsubmit = async (e) => {
-    e.preventDefault();
-    const f = new FormData(e.target);
-    try { S.user = await api('/api/me', { method: 'PATCH', body: { name: f.get('name'), town: f.get('town') } }); renderAccountButton(); toast('Profile saved'); } catch (x) { toast(x.message); }
-  };
-  $('#pw').onsubmit = async (e) => {
-    e.preventDefault();
-    const f = new FormData(e.target);
-    try { await api('/api/me/password', { body: { old: f.get('old'), new: f.get('new') } }); e.target.reset(); toast('Password changed'); } catch (x) { toast(x.message); }
-  };
-  $('#logout').onclick = async () => { await api('/api/auth/logout', { body: {} }).catch(() => {}); S.user = null; renderAccountButton(); toast('Signed out'); location.hash = '#/specials'; };
-  $('#del-acc').onclick = async () => {
-    if (!confirm('Delete your account and saved lists? This cannot be undone.')) return;
-    try { await api('/api/me', { method: 'DELETE' }); S.user = null; renderAccountButton(); toast('Account deleted'); location.hash = '#/specials'; } catch (x) { toast(x.message); }
-  };
-}
-
-// ------------------------------------------------------------------ admin
-async function renderAdmin() {
-  if (!S.user || !S.user.is_admin) { view.innerHTML = '<div class="panel empty"><b>Admins only</b>Ask the site owner to run <code>python -m namshop make-admin you@example.com</code>.</div>'; return; }
-  view.innerHTML = '<div class="page-head"><div><h1>Admin</h1><p class="muted">Load this week\'s leaflets and keep prices fresh.</p></div></div><div id="admin"><div class="loading">Loading…</div></div>';
+async function renderAdmin(box) {
   let d;
-  try { d = await api('/api/admin/summary'); } catch (e) { $('#admin').innerHTML = `<div class="empty">${h(e.message)}</div>`; return; }
+  try { d = await api('/api/admin/summary'); } catch (e) { box.innerHTML = `<div class="empty">${h(e.message)}</div>`; return; }
   const fs = d.feeds_status || {};
-  $('#admin').innerHTML = `<div class="two">
-    <form class="panel" id="imp"><h2>Import prices &amp; specials</h2>
-      <p class="muted" style="margin-top:-6px">CSV or JSON. Columns: <code>store, item, size, brand, price, special_price, special_label, valid_until</code> (also accepts <code>product_id</code> or <code>item_id</code>). Rows replace the current price for that shop and product.</p>
-      <label>File<input type="file" id="imp-file" accept=".csv,.json,.txt,text/csv,application/json"></label>
-      <label>…or paste<textarea id="imp-text" rows="7" placeholder="store,item,size,brand,price,special_price,special_label,valid_until&#10;Shoprite,Super maize meal,10kg,Top Score,139.99,109.99,Weekly special,${addDays(S.meta.today, 5)}"></textarea></label>
-      <label>Shop for rows without a store column<select id="imp-store"><option value="">(use the store column)</option>${S.meta.stores.map((s) => `<option value="${h(s.id)}">${h(s.name)}</option>`).join('')}</select></label>
-      <button class="btn primary" type="submit">Import</button><div id="imp-out" style="margin-top:10px"></div></form>
-    <div style="display:flex;flex-direction:column;gap:16px">
-      <div class="panel"><h2>Prices in the database</h2><table class="simple"><tr><th>Source</th><th>Rows</th><th>Latest</th></tr>
-        ${d.price_rows.map((r) => `<tr><td>${h(r.source)}</td><td>${r.n}</td><td>${h(fmtDate(r.latest))}</td></tr>`).join('')}</table>
-        <p class="muted" style="font-size:.85rem">${d.users} registered user${d.users === 1 ? '' : 's'}.</p></div>
-      <div class="panel"><h2>Sample prices</h2><p class="muted" style="margin-top:-6px">Illustrative prices that fill gaps so the app works before real data arrives. Turn off once you import real prices.</p>
-        <button class="btn ${d.sample_enabled ? 'danger' : 'green'}" type="button" id="sample-toggle">${d.sample_enabled ? 'Turn sample prices off' : 'Turn sample prices on'}</button></div>
-      <div class="panel"><h2>Price feeds</h2>
-        ${d.feeds.length ? `<ul>${d.feeds.map((f) => `<li><b>${h(f.name || f.url)}</b> <span class="muted">${h(f.url)}</span></li>`).join('')}</ul>`
-          : '<p class="muted">No feeds yet. List CSV/JSON URLs in <code>sources.json</code> in the data folder to fetch them automatically every few hours.</p>'}
-        ${fs.at ? `<p class="muted" style="font-size:.85rem">Last refresh ${h(fs.at.replace('T', ' ').slice(0, 16))}: ${fs.results.map((r) => `${h(r.name)} ${r.ok ? '✓ ' + r.imported : '✗ ' + h(r.errors[0] || '')}`).join('; ')}</p>` : ''}
-        <button class="btn" type="button" id="refresh" ${d.feeds.length ? '' : 'disabled'}>Refresh feeds now</button></div>
-    </div></div>`;
+  box.innerHTML = `<div class="section-head"><div><h2>⚙️ Admin</h2><p class="muted">Keep prices fresh for everyone.</p></div></div>
+    <div class="two">
+      <div class="stack">
+        <form class="panel" id="claude-key"><h2>🤖 Read pamphlets with Claude</h2>
+          <p class="muted" style="margin-top:-6px">${S.meta.claude ? '✅ Connected. New pamphlets are read automatically on every refresh.' : 'Add an Anthropic API key and every pamphlet the Refresh button finds is read automatically: products, prices and dates become specials.'}</p>
+          <label>Anthropic API key<input type="password" name="key" autocomplete="off" placeholder="sk-ant-…"></label>
+          <button class="btn primary" type="submit">${S.meta.claude ? 'Replace key' : 'Connect Claude'}</button></form>
+        <div class="panel"><h2>🔄 Pamphlets &amp; feeds</h2><p class="muted" style="margin-top:-6px">${lastRefreshText()}</p>
+          <button class="btn gold" type="button" id="force-refresh">Refresh everything now</button>
+          ${fs.at ? `<p class="muted" style="font-size:.82rem">Feeds ${h(ago(fs.at))}: ${fs.results.map((r) => `${h(r.name)} ${r.ok ? '✓ ' + r.imported : '✗'}`).join('; ')}</p>` : ''}</div>
+        <div class="panel"><h2>🧪 Sample prices</h2><p class="muted" style="margin-top:-6px">Illustrative prices that fill gaps until real data arrives.</p>
+          <button class="btn ${d.sample_enabled ? 'danger' : 'green'}" type="button" id="sample-toggle">${d.sample_enabled ? 'Turn sample prices off' : 'Turn sample prices on'}</button></div>
+      </div>
+      <div class="stack">
+        <form class="panel" id="imp"><h2>📥 Import prices</h2>
+          <p class="muted" style="margin-top:-6px">CSV or JSON with <code>store, item, size, brand, price, special_price, special_label, valid_until</code>.</p>
+          <label>File<input type="file" id="imp-file" accept=".csv,.json,.txt,text/csv,application/json"></label>
+          <label>…or paste<textarea id="imp-text" rows="5"></textarea></label>
+          <button class="btn primary" type="submit">Import</button><div id="imp-out" style="margin-top:10px"></div></form>
+        <div class="panel"><h2>📊 Prices by source</h2><table class="simple"><tr><th>Source</th><th>Rows</th><th>Latest</th></tr>
+          ${d.price_rows.map((r) => `<tr><td>${h(r.source)}</td><td>${r.n}</td><td>${h(fmtDate(r.latest))}</td></tr>`).join('')}</table>
+          <p class="muted" style="font-size:.82rem">${d.users} registered user${d.users === 1 ? '' : 's'}.</p></div>
+      </div>
+    </div>`;
+  $('#claude-key').onsubmit = async (e) => {
+    e.preventDefault();
+    const key = new FormData(e.target).get('key');
+    try { await api('/api/admin/claude-key', { body: { key } }); await loadMeta(); toast('🤖 Claude connected'); renderAdmin(box); } catch (x) { toast(x.message); }
+  };
+  $('#force-refresh').onclick = async () => {
+    try { R.userStarted = true; const s = await api('/api/refresh', { body: { force: true } }); $('#refresh-btn').classList.add('spinning'); showRefresh(s); pollRefresh(); } catch (x) { toast(x.message); }
+  };
+  $('#sample-toggle').onclick = async () => {
+    try { await api('/api/admin/sample', { body: { enabled: !d.sample_enabled } }); S.items = {}; S.baskets = null; await loadMeta(); renderAdmin(box); } catch (x) { toast(x.message); }
+  };
   $('#imp-file').onchange = async (e) => { const f = e.target.files[0]; if (f) $('#imp-text').value = await f.text(); };
   $('#imp').onsubmit = async (e) => {
     e.preventDefault();
@@ -826,17 +1257,11 @@ async function renderAdmin() {
     const text = $('#imp-text').value;
     if (!text.trim()) { out.innerHTML = '<p class="form-error">Choose a file or paste some rows.</p>'; return; }
     try {
-      const r = await api('/api/admin/import', { body: { text, store: $('#imp-store').value || null } });
-      out.innerHTML = `<div class="alert ${r.errors.length ? 'warn' : 'ok'}">Imported ${r.imported} price${r.imported === 1 ? '' : 's'}.${r.errors.length ? '<br>' + r.errors.map(h).join('<br>') : ''}</div>`;
-      S.items = {};
+      const r = await api('/api/admin/import', { body: { text } });
+      out.innerHTML = `<div class="callout ${r.errors.length ? 'warn' : 'ok'}">Imported ${r.imported} price${r.imported === 1 ? '' : 's'}.${r.errors.length ? '<br>' + r.errors.map(h).join('<br>') : ''}</div>`;
+      S.items = {}; S.baskets = null;
       await loadMeta();
     } catch (x) { out.innerHTML = `<p class="form-error">${h(x.message)}</p>`; }
-  };
-  $('#sample-toggle').onclick = async () => {
-    try { await api('/api/admin/sample', { body: { enabled: !d.sample_enabled } }); S.items = {}; await loadMeta(); renderAdmin(); } catch (x) { toast(x.message); }
-  };
-  $('#refresh').onclick = async () => {
-    try { const r = await api('/api/admin/refresh', { body: {} }); toast(`Refreshed ${r.results.length} feed(s)`); S.items = {}; await loadMeta(); renderAdmin(); } catch (x) { toast(x.message); }
   };
 }
 
@@ -856,7 +1281,7 @@ function setAuthMode(mode) {
   $$('.auth-tabs button').forEach((b) => b.setAttribute('aria-selected', b.dataset.auth === mode));
   $$('#auth-form .reg-only').forEach((el) => { el.hidden = !reg; });
   $('#auth-title').textContent = reg ? 'Create your free account' : 'Welcome back';
-  $('#auth-sub').textContent = reg ? 'Save lists, choose your shops and share specials with other shoppers.' : 'Sign in to save your lists, pick your shops and report specials.';
+  $('#auth-sub').textContent = reg ? 'Save lists, choose your shops and share specials with other shoppers.' : 'Sign in to save your lists, pick your shops and share specials.';
   $('#auth-submit').textContent = reg ? 'Create account' : 'Sign in';
   $('#auth-form [name=password]').autocomplete = reg ? 'new-password' : 'current-password';
 }
@@ -873,41 +1298,59 @@ $('#auth-form').onsubmit = async (e) => {
     $('#auth-dialog').close();
     e.target.reset();
     renderAccountButton();
-    toast(authMode === 'register' ? `Welcome, ${S.user.name.split(' ')[0]}! Your account is ready.` : `Welcome back, ${S.user.name.split(' ')[0]}`);
+    if (authMode === 'register') confetti();
+    toast(authMode === 'register' ? `Welcome, ${S.user.name.split(' ')[0]}! 🎉` : `Welcome back, ${S.user.name.split(' ')[0]} 👋`);
     route();
   } catch (x) {
     $('#auth-error').textContent = x.message;
+    animate($('#auth-dialog'), { transform: ['translateX(0px)', 'translateX(-8px)', 'translateX(8px)', 'translateX(0px)'] }, { duration: 0.3 });
   } finally { btn.disabled = false; }
 };
+
+// ------------------------------------------------------------------ global clicks
 document.addEventListener('click', (e) => {
   if (e.target.closest('[data-signin]')) openAuth('login');
   if (e.target.closest('[data-register]')) openAuth('register');
+  if (e.target.closest('[data-refresh]') || e.target.closest('#refresh-btn')) startRefresh();
   const deal = e.target.closest('[data-add-deal]');
-  if (deal && S.specials.data) {
-    const x = S.specials.data.results[+deal.dataset.addDeal];
-    addToCart({ item_id: x.item_id, product_id: x.product_id, name: x.name, size: x.size, brand: x.brand });
+  if (deal) {
+    const x = S.deals[deal.dataset.addDeal];
+    if (x) {
+      addToCart({ item_id: x.item_id, product_id: x.product_id, name: x.name, size: x.size, brand: x.brand, category: x.category }, 1, { from: deal });
+      if (deal.classList.contains('add-btn')) {
+        deal.classList.add('added'); deal.textContent = '✓ Added'; pop(deal);
+        setTimeout(() => { deal.classList.remove('added'); deal.textContent = '＋ Add'; }, 1600);
+      }
+    }
   }
-  const pill = e.target.closest('.store-pill');
-  if (pill) {
-    const sel = S.specials.stores;
-    sel.has(pill.dataset.store) ? sel.delete(pill.dataset.store) : sel.add(pill.dataset.store);
-    renderStrip();
-    refreshSpecials();
+  const basket = e.target.closest('[data-basket]');
+  if (basket) {
+    if (basket.classList.contains('chip')) {
+      const b = (S.baskets || []).find((x) => x.id === basket.dataset.basket);
+      if (b) {
+        b.lines.forEach((ln) => addToCart({ item_id: ln.item_id, name: ln.name, size: ln.size }, ln.qty, { quiet: true }));
+        toast(`${b.emoji} Added ${b.name}`); pop(basket);
+        drawLines(false, true); loadLineDetails(); changed();
+      }
+    } else useBasket(basket.dataset.basket, basket);
   }
+  const open = e.target.closest('[data-open]');
+  if (open && S.view === 'pamphlets') openViewer(open.dataset.open);
 });
 
 // ------------------------------------------------------------------ routing & start
-const VIEWS = { specials: renderSpecials, compare: renderCompare, cart: renderCart, lists: renderLists, report: renderReport, admin: renderAdmin, account: renderAccountPage };
+const VIEWS = { deals: renderDeals, pamphlets: renderPamphlets, compare: renderCompare, cart: renderCart, me: renderMe };
 function route() {
-  const v = location.hash.replace(/^#\/?/, '').split('/')[0] || 'specials';
-  S.view = VIEWS[v] ? v : 'specials';
+  const v = location.hash.replace(/^#\/?/, '').split('/')[0] || 'deals';
+  S.view = VIEWS[v] ? v : 'deals';
+  clearTimers();
   $$('#tabs a').forEach((a) => {
     const on = a.dataset.view === S.view;
     a.classList.toggle('active', on);
     if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   });
-  renderStrip();
-  VIEWS[S.view]();
+  const go = () => VIEWS[S.view]();
+  if (document.startViewTransition && !REDUCED) document.startViewTransition(go); else go();
 }
 window.addEventListener('hashchange', () => { route(); window.scrollTo(0, 0); });
 
@@ -922,8 +1365,9 @@ async function loadMeta() {
 (async function start() {
   updateCartCount();
   try { await loadMeta(); } catch (e) {
-    view.innerHTML = `<div class="panel empty"><b>Can't reach the server</b>${h(e.message)}</div>`;
+    view.innerHTML = `<div class="panel empty"><span class="big-emoji">📡</span><b>Can't reach the server</b>${h(e.message)}</div>`;
     return;
   }
   route();
+  if (S.meta.refreshing) { $('#refresh-btn').classList.add('spinning'); pollRefresh(); }
 })();

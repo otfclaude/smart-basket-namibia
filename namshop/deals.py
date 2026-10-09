@@ -22,7 +22,7 @@ LEFT JOIN users u ON u.id = pr.reported_by
 
 
 def special_active(r, d: date) -> bool:
-    if r["special_price"] is None or r["special_price"] >= r["price"]:
+    if r["special_price"] is None or r["special_price"] > r["price"]:
         return False
     if r["valid_from"] and r["valid_from"] > d.isoformat():
         return False
@@ -55,7 +55,7 @@ def price_view(r, d: date | None = None) -> dict:
 def specials(conn, q: str = "", stores: list[str] | None = None, category: str = "",
              sort: str = "percent", limit: int = 60, offset: int = 0) -> dict:
     d = today()
-    rows = conn.execute(_PRICE_SQL + " WHERE pr.special_price IS NOT NULL AND pr.special_price < pr.price").fetchall()
+    rows = conn.execute(_PRICE_SQL + " WHERE pr.special_price IS NOT NULL AND pr.special_price <= pr.price").fetchall()
     out = [price_view(r, d) for r in rows if special_active(r, d)]
     if stores:
         keep = set(stores)

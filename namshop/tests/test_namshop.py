@@ -131,7 +131,7 @@ def test_csv_import_matches_creates_and_reports_errors(conn):
     rows = {r["store_id"]: r for r in conn.execute(
         "SELECT * FROM prices WHERE product_id = 'maize-meal-10kg--top-score' AND source = 'import:test'")}
     assert rows["shoprite"]["special_price"] == 99.99
-    assert rows["picknpay"]["price"] == 141.99            # brand and size peeled off the name
+    assert rows["model"]["price"] == 141.99   # "Pick n Pay" is now Model; brand and size peeled off the name
     assert conn.execute("SELECT unit, qty FROM items WHERE id = 'kapana-spice-200g'").fetchone()[:] == ("kg", 0.2)
     best = deals.item_prices(conn, "maize-meal-10kg", ["shoprite"])
     assert any(p["on_special"] and p["price"] == 99.99 and p["source"] == "import:test" for p in best)
@@ -251,3 +251,20 @@ def test_api_admin_import(client):
     assert any(p["price"] == 33.33 and p["on_special"] for p in prices)
     assert client.post("/api/admin/sample", json={"enabled": False}).json()["sample_enabled"] is False
     assert client.get("/api/meta").json()["sample_data"] is False
+
+
+def test_api_pamphlets_refresh_and_baskets(client, monkeypatch):
+    from namshop import leaflets
+    monkeypatch.setattr(leaflets, "sources", lambda: {})          # no network in tests
+    monkeypatch.setattr(logos, "fetch_logos", lambda *a, **k: {})
+    assert client.get("/api/leaflets").json()["leaflets"] == []
+    s = client.post("/api/refresh", json={}).json()
+    assert "running" in s and "claude" in s
+    assert client.get("/api/refresh/status").status_code == 200
+    assert client.get("/leaflets/shoprite/..%2F..%2Fnamshop.db").status_code == 404
+    baskets = client.get("/api/baskets").json()["baskets"]
+    assert len(baskets) >= 5 and all(b["total"] and b["stores"] for b in baskets)
+    assert client.post("/api/admin/claude-key", json={"key": "sk-ant-" + "x" * 30}).status_code == 401
+    meta = client.get("/api/meta").json()
+    assert meta["claude"] in (True, False) and "logo_version" in meta
+    assert [s["id"] for s in meta["stores"]].count("model") == 1 and "picknpay" not in [s["id"] for s in meta["stores"]]

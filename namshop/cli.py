@@ -25,7 +25,7 @@ def main(argv: list[str] | None = None):
     i = sub.add_parser("import", help="import prices/specials from a CSV or JSON file")
     i.add_argument("file")
     i.add_argument("--store", help="shop id to use for rows without a 'store' column")
-    sub.add_parser("refresh", help="fetch every feed listed in sources.json")
+    sub.add_parser("refresh", help="fetch the latest pamphlets, logos and price feeds now")
     a = sub.add_parser("make-admin", help="give an existing account admin rights")
     a.add_argument("email")
     sm = sub.add_parser("sample", help="turn the sample prices on or off")
@@ -52,8 +52,19 @@ def main(argv: list[str] | None = None):
             print("  !", e)
         sys.exit(1 if res["errors"] and not res["imported"] else 0)
     elif args.cmd == "refresh":
-        for r in importer.refresh_feeds(_conn()):
-            print(f"{r['name']}: {'ok' if r['ok'] else 'FAILED'}, {r['imported']} prices", *r["errors"][:5], sep="\n  ")
+        import time
+        from . import leaflets
+        _conn().close()
+        m = leaflets.RefreshManager(str(db.db_path()))
+        m.start(force=True)
+        while m.status()["running"]:
+            time.sleep(1)
+        s = m.status()
+        for shop in s["shops"].values():
+            print(f"{shop['name']:22} {shop['state']:8} {shop['message']}")
+        print(s["summary"])
+        if not s["claude"]:
+            print("Tip: set ANTHROPIC_API_KEY so Claude reads the prices from the pamphlets.")
     elif args.cmd == "make-admin":
         ok = auth.make_admin(_conn(), args.email)
         print("Done." if ok else f"No account with email {args.email}. Register in the app first.")

@@ -13,7 +13,7 @@ from datetime import date, timedelta
 from .db import get_setting, set_setting, stamp, today
 
 # Relative price level per shop (1.0 = typical). Illustrative only.
-STORE_INDEX = {"usave": 0.95, "shoprite": 0.96, "metrohyper": 0.95, "choppies": 0.97, "picknpay": 0.99,
+STORE_INDEX = {"usave": 0.95, "shoprite": 0.96, "metrohyper": 0.95, "choppies": 0.97, "model": 0.99,
                "woermannbrock": 0.99, "checkers": 1.01, "okfoods": 1.02, "foodlovers": 1.02,
                "clicks": 1.03, "spar": 1.05, "woolworths": 1.15}
 CATEGORY_INDEX = {("foodlovers", "Fruit & veg"): 0.86, ("metrohyper", "Staples & grains"): 0.95,

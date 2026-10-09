@@ -1,68 +1,96 @@
 # Smart Basket Namibia 🛒🇳🇦
 
-A web app that collects the sales, promotions and specials at Namibian supermarkets and
-household suppliers. Shoppers can create an account and build the cheapest possible cart, or the
-best cart that fits a budget.
+A web app that collects this week's specials from Namibian supermarkets and household
+suppliers. It reads the shops' own pamphlets and turns them into one cheapest cart, or the best
+cart for your budget. Anyone can browse; a free account saves lists and shops.
 
-**Shops included:** Shoprite, Checkers, U-Save, OK Foods, Pick n Pay, SPAR, Woermann Brock,
-Choppies, Metro Hyper, Food Lover's Market, Woolworths Food and Clicks. The list lives in
-`data/stores.json`, where you can add, remove or edit shops.
+**Shops:** Shoprite, Checkers, U-Save, OK Foods, Model (Pick n Pay Namibia became Model on
+1 July 2025), SPAR, Woermann Brock, Choppies, Metro, Food Lover's Market, Woolworths Food and
+Clicks. The list lives in `data/stores.json`. An import that still says "Pick n Pay" goes to Model.
 
-| Specials (desktop) | Cheapest cart | Phone |
+| Deals (desktop) | Cheapest cart | Phone, dark mode |
 |---|---|---|
-| ![Specials](previews/specials.png) | ![Cheapest cart](previews/cheapest-cart.png) | ![Phone](previews/mobile-specials.png) |
+| ![Deals](previews/deals.png) | ![Cart](previews/cart.png) | ![Phone](previews/mobile-dark.png) |
 
-More screenshots: [budget setup](previews/budget-setup.png), [budget cart](previews/budget-cart.png),
-[price comparison on a phone](previews/mobile-compare.png). These show the built-in sample prices.
+More screenshots: [one-tap baskets](previews/deals-baskets.png), [budget cart](previews/budget.png),
+[price comparison](previews/compare.png), [refresh progress](previews/refresh.png),
+[cart on a phone](previews/mobile-cart.png). They show the built-in sample prices.
 
 ## What it does
 
 | Page | What you can do |
 |---|---|
-| 🏷️ **Specials** | Every special running today, from all shops. Filter by shop (tap a logo), category or search, and sort by % off, N$ saved, price or ending soonest. Add a special to your cart in one tap. |
-| 🔎 **Compare** | Search any product to see its price at every shop, cheapest first, including unit price (per kg / litre / item) and any special. |
-| 🛒 **My cart → Cheapest cart** | Add items by search, or paste a whole list (`2 x bread`, `maize meal 10kg`, `18 eggs`…). Choose "any brand" or a specific brand, the shops you can reach, how many shops you'll visit, and an optional taxi/fuel cost per shop. The optimiser decides where to buy each item for the lowest total. It also shows what the whole list would cost at each single shop. |
-| 💰 **My cart → Fit my budget** | Enter a budget (N$) and mark each item *Must have*, *High*, *Medium* or *Nice to have*. You get the best cart that fits: must-haves are always included, then the rest by priority, bought as cheaply as possible. It lists what didn't fit and roughly how much more each would cost. |
-| 📋 **Lists** | Signed-in users save lists and budgets and reopen them any week to rebuild with new prices. A plan can also be sent to WhatsApp, copied or printed as a tick-off list for the shop. |
-| 📣 **Report** | Signed-in shoppers report a special they saw in a shop or leaflet. It goes live straight away, tagged "Reported by …". |
-| 👤 **Account** | Profile, town, "my shops" (the shops you can reach), password change, account deletion. |
-| ⚙️ **Admin** | Import prices and specials (CSV/JSON), refresh price feeds, and turn sample prices on or off. |
+| 🔥 **Deals** | Every special running today. You get live counters, floating "hottest deal" cards, an auto-scrolling carousel of the biggest price drops, and shop logos you tap to filter. The grid loads more as you scroll. Tap **＋ Add** and the item flies into your cart. |
+| ⚡ **One-tap baskets** | Month-end stock-up, Braai weekend, Breakfast basics, Baby essentials, Cleaning day and Student survival, each showing what it costs today. One tap builds the cart. |
+| 📰 **Pamphlets** | Each shop's latest pamphlet with its cover, dates and how many prices were read from it. Open it to flip through the pages or the PDF. |
+| 🔄 **Refresh** | The yellow button fetches the newest pamphlet from every shop. A progress panel shows each shop's logo moving through searching → downloading → reading with Claude → done. New prices go straight into Deals, Compare and the cart. |
+| 🔎 **Compare** | Any product's price at every shop, cheapest first, with unit prices and specials. |
+| 🛒 **Cart → Cheapest** | Add by search, quick basket, or by pasting a list (`2 x bread`, `maize meal 10kg`, `18 eggs`…). Pick any brand or a specific one. The total updates live as you change things. Under **⚙️ Shops & travel** you choose your shops, how many you'll visit, and a taxi/fuel cost per shop. |
+| 💰 **Cart → Fit my budget** | Drag the budget slider and watch the gauge and cart update. Mark items ⭐ Must have, High, Medium or Nice to have; must-haves always go in and the rest fill the budget in order. You also see what didn't fit and roughly how much more it would cost. |
+| 👤 **Me** | Sign up or sign in, saved lists, my shops, profile and password, **📣 Share a special** spotted in store, and admin tools for admins. |
 
-Shop logos are shown throughout. By default they are badges drawn in each chain's colours. To use
-a real logo file, put it in `~/.namshop/logos/<shop id>.png` (or `.svg`, `.jpg`, `.webp`) and it
-replaces the badge. Logos belong to their owners, so use them with permission.
+Plans can be sent to WhatsApp, copied or printed as a tick-off list. The interface uses
+[Motion](https://motion.dev) (bundled, MIT) for its animations: staggered card entrances, counters
+that count up, spring transitions, fly-to-cart, confetti on wins and view transitions between
+pages. It respects the system "reduce motion" setting and works in light and dark mode.
 
-## Where the prices come from
+## Where prices come from
 
-Namibian chains publish specials mostly as printed or PDF leaflets and on social media. They don't
-offer open price data, so the app takes prices from three places:
+1. **Shop pamphlets (the Refresh button).** `leaflets.py` opens each shop's specials pages listed in
+   `data/leaflet_sources.json`, finds the current pamphlets and downloads them. It handles PDF links,
+   leaflet images, and FlippingBook flipbooks like `specials.shoprite.com.na/deals/…`, which it reads
+   as a PDF download or as page images. It only fetches where robots.txt allows. A pamphlet that
+   hasn't changed is skipped.
+2. **Claude reads the prices.** New pamphlets go to Claude (model `claude-opus-5-5`,
+   `NAMSHOP_CLAUDE_MODEL` to change). Claude returns every product, brand, size, normal price,
+   special price and validity date as structured JSON, which becomes specials tagged
+   "📰 Pamphlet". Server-side refusal fallback is switched on: if the model declines a pamphlet, the
+   API retries on another model. Without a key, pamphlets are still fetched and shown on the
+   Pamphlets page, just not turned into prices. To connect Claude, set `ANTHROPIC_API_KEY`, or paste
+   a key on the Me page under Admin (stored in `~/.namshop/anthropic_api_key`, readable only by you).
+3. **Specials.NA and other aggregators.** These are listed as extra sources for shops without their
+   own pamphlet page, such as U-Save.
+4. **Imports and feeds.** CSV/JSON uploads on the admin page or `python -m namshop import FILE`, and
+   URLs in `~/.namshop/sources.json`. See `data/import_template.csv`.
+5. **Community reports.** Shoppers share specials they see in store.
 
-1. **Imports.** An admin types up or exports this week's leaflets as CSV/JSON and uploads them on
-   the Admin page, or runs `python -m namshop import leaflet.csv`.
-2. **Feeds.** Any URL that returns the same CSV/JSON format, for example from a partner retailer,
-   a scraper you run elsewhere, or a shared spreadsheet published as CSV. List the URLs in
-   `~/.namshop/sources.json` (see `data/sources.example.json`). The server fetches them every
-   6 hours (`NAMSHOP_REFRESH_HOURS`), or on demand with `python -m namshop refresh`.
-3. **Community reports.** Shoppers report specials from the Report page.
+While running, the server refreshes everything every 6 hours (`NAMSHOP_REFRESH_HOURS`, 0 = only on
+demand). Anyone can press Refresh, and a second press within 15 minutes just shows the last result
+(`NAMSHOP_REFRESH_MIN_GAP`, in seconds).
 
-Until real data is loaded, **sample prices** fill the gaps so the app works out of the box. They
-are illustrative only, are tagged "Sample price" everywhere, and change each week. A real price
-always replaces the sample for that shop and product. Turn samples off on the Admin page or with
-`python -m namshop sample off` once you have real data.
+Until real data arrives, **sample prices** fill the gaps so the app works out of the box. They are
+tagged "Sample" and are replaced by real prices shop by shop. Turn them off on the admin panel or
+with `python -m namshop sample off`.
+
+**About the pamphlet sources.** The shop URLs come from desk research in October 2026. The
+environment this was built in couldn't open any shop website, so the fetcher was tested against
+saved copies of the expected page structure, not the live sites. On first run on a normal internet
+connection, check the Refresh panel. A shop that shows "No pamphlet found" or "Couldn't reach" needs
+its entry in `leaflet_sources.json` adjusted. Copy the file to `~/.namshop/leaflet_sources.json`
+and edit it there.
+
+### Real shop logos
+
+On start-up and on every Refresh, the app downloads each shop's real logo from its own website
+(header logo or app icon), or from Wikimedia Commons where a file exists (SPAR, Choppies,
+Woolworths). Logos are cached in `~/.namshop/logos/`. SVGs are cleaned of scripts and served with a
+strict content-security policy. Until a logo is downloaded, a badge in the shop's colours is shown.
+You can also drop your own `~/.namshop/logos/<shop id>.png` (or `.svg`, `.jpg`, `.webp`). Logos
+belong to their owners.
 
 ### Import format
 
 CSV (comma, semicolon or tab separated) or a JSON list of objects. Header names are
-case-insensitive. Only `store` and a price are required. See `data/import_template.csv`.
+case-insensitive. Only `store` and a price are required.
 
 | Column | Meaning |
 |---|---|
 | `store` | Shop id or name (`shoprite`, `Pick n Pay`, …) |
-| `item`, `size`, `brand`, `category` | Product, e.g. `Super maize meal`, `10kg`, `Top Score`. Leaflet-style names like `Top Score Super Maize Meal 10kg` also work: the brand and size are recognised. New products are added to the catalogue. |
-| `product_id` / `item_id` | Use instead of item/brand to target an existing catalogue entry exactly. |
+| `item`, `size`, `brand`, `category` | Product. Leaflet-style names such as `Top Score Super Maize Meal 10kg` work too. |
+| `product_id` / `item_id` | Target an existing catalogue entry exactly. |
 | `price` | Normal shelf price (N$). |
-| `special_price`, `special_label` | Promo price and its name (`Weekend deal`). |
-| `valid_from`, `valid_until` | Special dates, `YYYY-MM-DD` or `DD/MM/YYYY`. Expired specials stop showing automatically. |
+| `special_price`, `special_label` | Promo price and its name. |
+| `valid_from`, `valid_until` | Dates, `YYYY-MM-DD` or `DD/MM/YYYY`. Expired specials disappear by themselves. |
 | `branch` | Optional branch or town. |
 
 ## Run it
@@ -71,59 +99,47 @@ Needs Python 3.10+.
 
 ```bash
 pip install -r namshop/requirements.txt
-python -m namshop serve --open            # http://127.0.0.1:8000
+export ANTHROPIC_API_KEY=sk-ant-...        # optional: lets the app read pamphlet prices
+python -m namshop serve --open             # http://127.0.0.1:8000
 ```
 
-Or double-click **`Start Smart Basket.command`** (macOS) / **`Start Smart Basket.bat`** (Windows)
-in the repository folder. It sets itself up on first run and opens your browser.
+Or double-click **`Start Smart Basket.command`** (macOS) / **`Start Smart Basket.bat`** (Windows).
 
-To let phones on the same Wi-Fi use it, run `python -m namshop serve --host 0.0.0.0` and open
-`http://<your computer's IP>:8000` on the phone. To host it on the internet, run it behind an HTTPS
-reverse proxy (e.g. Caddy or nginx) and set `NAMSHOP_SECURE_COOKIES=1`.
+To let phones on the same Wi-Fi use it, run `python -m namshop serve --host 0.0.0.0`. To host it
+on the internet, put it behind HTTPS (Caddy or nginx) and set `NAMSHOP_SECURE_COOKIES=1`.
+To make yourself admin after registering, run `python -m namshop make-admin you@example.com`.
 
-Make yourself admin after registering in the app:
-
-```bash
-python -m namshop make-admin you@example.com
-```
-
-Other commands: `python -m namshop import FILE [--store ID]`, `refresh`, `sample on|off`, `stats`.
-Data (SQLite database, logos, `sources.json`) is stored in `~/.namshop/`, or in `NAMSHOP_DATA` if
-set. Interactive API docs are at `/api/docs`.
+Other commands: `python -m namshop import FILE [--store ID]`, `refresh` (pamphlets, logos and feeds),
+`sample on|off`, `stats`. Data lives in `~/.namshop/` (or `NAMSHOP_DATA`). API docs are at
+`/api/docs`.
 
 ## How the cart optimiser works
 
-Each shop's best option for each line (cheapest matching product, specials applied) feeds a small
-mixed-integer programme, solved exactly with HiGHS via PuLP:
-
-* **Cheapest cart:** choose one shop per item to cover as much of the list as the shop limit
-  allows, then minimise item cost + travel cost × shops visited.
-* **Budget cart:** must-haves are hard constraints. Every other item scores 6/4/2 points by
-  priority for the first unit and half that for each extra unit. The solver first maximises points
-  within the budget (travel included), then minimises cost for that selection. If the must-haves
-  alone exceed the budget, it says by how much.
+Each shop's cheapest matching product for each line (specials applied) feeds a small
+mixed-integer programme, solved exactly with HiGHS via PuLP. A cheapest cart covers as much of the
+list as the shop limit allows, then minimises item cost plus travel. A budget cart keeps must-haves
+as hard constraints and scores the rest 6/4/2 by priority for the first unit and half that for extra
+units. It maximises that score within the budget, then minimises cost.
 
 ## Accounts and security
 
-Passwords are hashed with PBKDF2-SHA256 (260k iterations). Sessions use random tokens stored
-hashed, in an HttpOnly, SameSite=Lax cookie that lasts 30 days. Repeated failed sign-ins are
-throttled. Anyone can browse and build carts without an account. Saving lists and reporting specials
-need one. Reports show only the reporter's first name.
+Passwords are hashed with PBKDF2-SHA256 (260k iterations). Sessions use random tokens stored hashed,
+in an HttpOnly SameSite=Lax cookie. Failed sign-ins are throttled. Pamphlet files are served only
+from the data folder (no path traversal). Downloaded SVG logos are cleaned of scripts, and the
+Claude key file is readable only by its owner.
 
 ## Layout
 
 ```
 namshop/
-  data/stores.json      shops: names, groups, logo colours
-  data/catalog.json     everyday groceries & household basics (items, sizes, brands)
-  db.py                 SQLite schema + seeding
-  sample.py             weekly sample prices (clearly labelled)
-  deals.py              specials, search, price comparison, shopping-list parsing
-  optimizer.py          cheapest / budget cart MIP
-  importer.py           CSV/JSON import, feeds, community reports
-  auth.py               accounts and sessions
-  logos.py              logo files or generated badges
-  server.py             FastAPI JSON API + static app
-  static/               single-page front end (HTML/CSS/JS, no build step)
-  tests/                python -m pytest namshop/tests
+  data/stores.json          shops, logo colours and logo sources
+  data/leaflet_sources.json where each shop publishes its pamphlets
+  data/catalog.json         everyday groceries & household basics
+  data/baskets.json         the one-tap baskets
+  leaflets.py               pamphlet discovery, download, Claude reading, Refresh manager
+  net.py                    polite fetching, robots.txt, link discovery
+  logos.py                  real logo download + badge fallback
+  db.py  sample.py  deals.py  optimizer.py  importer.py  auth.py  server.py  cli.py
+  static/                   single-page app (HTML/CSS/JS, Motion in static/vendor)
+  tests/                    python -m pytest namshop/tests
 ```
