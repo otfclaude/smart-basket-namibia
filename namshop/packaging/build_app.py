@@ -49,7 +49,9 @@ def main():
     if sys.platform in ("darwin", "win32"):
         args += ["--windowed"]
     if sys.platform == "darwin":
-        args += ["--icon", str(PKG / "packaging" / "icon.icns"), "--osx-bundle-identifier", BUNDLE_ID]
+        import platform
+        args += ["--icon", str(PKG / "packaging" / "icon.icns"), "--osx-bundle-identifier", BUNDLE_ID,
+                 "--target-arch", platform.machine()]   # arm64, or x86_64 when run under Rosetta
     if importlib.util.find_spec("webview"):
         args += ["--collect-all", "webview"]
     PyInstaller.__main__.run(args)
