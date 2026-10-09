@@ -5,7 +5,7 @@ name: Smart Basket Mac app
 # to the "smart-basket-mac" release.
 on:
   push:
-    branches: ["claude/amazing-mccarthy-sz8fya", "main"]
+    branches: ["main"]
     paths: ["namshop/**", ".github/workflows/namshop-mac.yml"]
   workflow_dispatch:
 

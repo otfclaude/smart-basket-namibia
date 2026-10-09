@@ -10,11 +10,11 @@ Clicks. The list lives in `data/stores.json`. An import that still says "Pick n 
 
 | Deals (desktop) | Cheapest cart | Phone, dark mode |
 |---|---|---|
-| ![Deals](previews/deals.png) | ![Cart](previews/cart.png) | ![Phone](previews/mobile-dark.png) |
+| ![Deals](namshop/previews/deals.png) | ![Cart](namshop/previews/cart.png) | ![Phone](namshop/previews/mobile-dark.png) |
 
-More screenshots: [one-tap baskets](previews/deals-baskets.png), [budget cart](previews/budget.png),
-[price comparison](previews/compare.png), [refresh progress](previews/refresh.png),
-[cart on a phone](previews/mobile-cart.png). They show the built-in sample prices.
+More screenshots: [one-tap baskets](namshop/previews/deals-baskets.png), [budget cart](namshop/previews/budget.png),
+[price comparison](namshop/previews/compare.png), [refresh progress](namshop/previews/refresh.png),
+[cart on a phone](namshop/previews/mobile-cart.png). They show the built-in sample prices.
 
 ## Download for Mac
 
