@@ -1,0 +1,24 @@
+name: Smart Basket Namibia tests
+
+on:
+  push:
+    paths: ["namshop/**", ".github/workflows/namshop.yml"]
+  pull_request:
+    paths: ["namshop/**", ".github/workflows/namshop.yml"]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: pip install -r namshop/requirements.txt
+      - run: python -m pytest namshop/tests -q

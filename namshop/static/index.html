@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Smart Basket Namibia</title>
+<meta name="description" content="Find this week's specials at Namibian supermarkets and build the cheapest shopping cart, or the best cart for your budget.">
+<meta name="theme-color" content="#0b3a75">
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<a class="skip" href="#view">Skip to content</a>
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="#/specials" aria-label="Smart Basket Namibia home">
+      <img src="/static/icon.svg" alt="" width="34" height="34">
+      <span>Smart Basket <b>Namibia</b></span>
+    </a>
+    <nav class="tabs" id="tabs" aria-label="Main">
+      <a href="#/specials" data-view="specials"><i aria-hidden="true">🏷️</i><span>Specials</span></a>
+      <a href="#/compare" data-view="compare"><i aria-hidden="true">🔎</i><span>Compare</span></a>
+      <a href="#/cart" data-view="cart"><i aria-hidden="true">🛒</i><span>My cart</span><em id="cart-count" hidden>0</em></a>
+      <a href="#/lists" data-view="lists"><i aria-hidden="true">📋</i><span>Lists</span></a>
+      <a href="#/report" data-view="report"><i aria-hidden="true">📣</i><span>Report</span></a>
+      <a href="#/admin" data-view="admin" id="admin-tab" hidden><i aria-hidden="true">⚙️</i><span>Admin</span></a>
+    </nav>
+    <div class="account" id="account"></div>
+  </div>
+</header>
+
+<div class="notice" id="notice" hidden></div>
+<section class="store-strip" id="store-strip" aria-label="Shops"></section>
+<main id="view" tabindex="-1"><div class="loading">Loading specials…</div></main>
+
+<footer class="footer">
+  <p>Smart Basket Namibia compares prices at Namibian supermarkets and household suppliers. Prices come from
+  imported leaflets, price feeds and shoppers' reports. Always check the shelf price in store.
+  Shop names and logos belong to their owners.</p>
+</footer>
+
+<dialog id="auth-dialog" aria-labelledby="auth-title">
+  <form method="dialog" class="dialog-close"><button aria-label="Close">✕</button></form>
+  <div class="auth-tabs" role="tablist">
+    <button type="button" role="tab" data-auth="login" aria-selected="true">Sign in</button>
+    <button type="button" role="tab" data-auth="register" aria-selected="false">Create account</button>
+  </div>
+  <h2 id="auth-title">Welcome back</h2>
+  <p class="muted" id="auth-sub">Sign in to save your lists, pick your shops and report specials.</p>
+  <form id="auth-form" novalidate>
+    <label class="reg-only" hidden>Your name<input name="name" autocomplete="name" maxlength="60"></label>
+    <label>Email<input name="email" type="email" autocomplete="email" required maxlength="120"></label>
+    <label>Password<input name="password" type="password" autocomplete="current-password" required minlength="8" maxlength="200"></label>
+    <label class="reg-only" hidden>Town <span class="muted">(optional)</span>
+      <input name="town" list="towns" maxlength="60" placeholder="e.g. Windhoek"></label>
+    <p class="form-error" id="auth-error" role="alert"></p>
+    <button class="btn primary wide" type="submit" id="auth-submit">Sign in</button>
+  </form>
+</dialog>
+
+<datalist id="towns">
+  <option>Windhoek</option><option>Swakopmund</option><option>Walvis Bay</option><option>Oshakati</option>
+  <option>Ongwediva</option><option>Ondangwa</option><option>Rundu</option><option>Katima Mulilo</option>
+  <option>Otjiwarongo</option><option>Tsumeb</option><option>Grootfontein</option><option>Okahandja</option>
+  <option>Rehoboth</option><option>Gobabis</option><option>Mariental</option><option>Keetmanshoop</option>
+  <option>Lüderitz</option><option>Outapi</option><option>Eenhana</option><option>Opuwo</option>
+  <option>Henties Bay</option><option>Omaruru</option><option>Karibib</option><option>Usakos</option>
+</datalist>
+
+<div id="toast" role="status" aria-live="polite"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>
