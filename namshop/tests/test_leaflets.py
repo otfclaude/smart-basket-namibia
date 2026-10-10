@@ -213,3 +213,68 @@ def test_logos_downloaded_from_site_and_sanitised(conn, tmp_path, monkeypatch):
     svg = (tmp_path / "logos" / "woermannbrock.svg").read_bytes()
     assert b"<script" not in svg and b"onload" not in svg and b"javascript:" not in svg
     assert logos.fetch_logos(conn, fetch=fake_fetch, fetch_text=fake_text) == {}   # cached
+
+
+# ---------------------------------------------------------------- specials.na (structure as seen in October 2026)
+SNA_ID = "f18be63e-ad96-4896-804e-019c66f65bcc"
+OTHER_ID = "a03445d6-a605-46b4-a75f-b81c20becbba"
+SNA_SOURCE = {"url": "https://specials.na/brands/shoprite", "follow": r"specials\.na/special/",
+              "files": "/api/special/[0-9a-f-]{36}/download"}
+SITES.update({
+    "https://specials.na/robots.txt": "User-agent: *\nDisallow:\n",
+    # the brand page shows each pamphlet's cover and links to its page
+    "https://specials.na/brands/shoprite": f"""
+        <title>Shoprite — Specials, Stores &amp; Deals in Namibia | Specials.NA | Specials.NA</title>
+        <link rel="icon" href="/icons/favicon-32.png">
+        <a href="/special/{SNA_ID}"><img src="/api/file-proxy?path=covers%2F{SNA_ID}.webp"
+           alt="Mid Month - October" class="object-cover"></a>""",
+    # the pamphlet's page: the cover again, and in its data the dates, the file and a download link
+    f"https://specials.na/special/{SNA_ID}": f"""
+        <title>Shoprite — Mid Month - October (valid until 18 Oct) | Specials.NA | Specials.NA</title>
+        <meta property="og:image" content="https://specials.na/api/file-proxy?path=covers%2F{SNA_ID}.webp">
+        <script>self.__next_f.push([1,"{{\\"cover_url\\":\\"/api/file-proxy?path=covers%2F{SNA_ID}.webp\\",\\"pdf_url\\":null,
+          \\"start_date\\":\\"2026-10-05\\",\\"end_date\\":\\"2026-10-18\\",\\"file_url\\":\\"uploads/1791187033361_mm_october.pdf\\",
+          \\"download\\":\\"/api/special/{SNA_ID}/download\\",\\"related\\":\\"/api/special/{OTHER_ID}/download\\"}}"])</script>""",
+    "https://model.example.na/robots.txt": "",
+    "https://model.example.na/": """<title>Model</title>
+        <a href="/files/Model_Birthday_Ts%20%26%20Cs_v3.pdf">Birthday competition</a>
+        <a href="/files/Model_October_Specials.pdf">This month's specials</a>""",
+})
+FILES.update({
+    f"https://specials.na/api/special/{SNA_ID}/download": PDF + b"mid-month",
+    f"https://specials.na/api/special/{OTHER_ID}/download": PDF + b"another shop",
+    f"https://specials.na/api/file-proxy?path=covers%2F{SNA_ID}.webp": JPEG,
+})
+
+
+def test_specials_na_gives_the_whole_pamphlet_not_its_cover():
+    found = leaflets.find_pamphlets("shoprite", SNA_SOURCE, fake_text)
+    assert len(found) == 1, [(p.kind, p.urls) for p in found]
+    p = found[0]
+    assert p.kind == "auto" and p.urls == [f"https://specials.na/api/special/{SNA_ID}/download"]
+    assert p.title == "Shoprite — Mid Month - October (valid until 18 Oct)"
+    assert (p.valid_from, p.valid_until) == ("2026-10-05", "2026-10-18")
+    leaflets.download(p, fake_fetch, fake_text)
+    assert p.kind == "pdf" and p.files == [(PDF + b"mid-month", "pdf")]
+
+
+def test_specials_na_pamphlet_is_stored_with_its_dates(conn, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    res = leaflets.refresh_store(conn, "shoprite", "Shoprite", [SNA_SOURCE], [], lambda *a: None, fake_fetch, fake_text, None)
+    assert res["state"] == "done"
+    [l] = leaflets.list_leaflets(conn)
+    assert l["kind"] == "pdf" and l["valid_until"] == "2026-10-18" and l["title"].startswith("Shoprite — Mid Month")
+
+
+def test_terms_and_conditions_pdfs_are_not_pamphlets():
+    found = leaflets.find_pamphlets("model", {"url": "https://model.example.na/"}, fake_text)
+    assert [p.urls for p in found] == [["https://model.example.na/files/Model_October_Specials.pdf"]]
+
+
+def test_old_cover_only_pamphlets_are_hidden(conn):
+    conn.execute("INSERT INTO leaflets(store_id, title, source_url, page_url, kind, files, sha256, fetched_at, status) "
+                 "VALUES('shoprite', 'Shoprite — Specials', ?, '', 'images', '[\"a.webp\"]', 'x', ?, 'stored')",
+                 (f"https://specials.na/api/file-proxy?path=covers%2F{SNA_ID}.webp", db.stamp()))
+    conn.commit()
+    assert leaflets.list_leaflets(conn) == []

@@ -468,7 +468,7 @@ async function renderDeals() {
   enhanceRails();
   countTo($('#st-total'), total);
   countTo($('#st-shops'), S.meta.stores.length);
-  loadLeaflets().then((l) => { const el = $('#st-pam'); if (el && S.view === 'deals') countTo(el, Object.keys(l).length); }).catch(() => {});
+  loadLeaflets().then(() => { const el = $('#st-pam'); if (el && S.view === 'deals') countTo(el, S.leafletList.length); }).catch(() => {});
 
   let jumped = !!f.q;
   $('#d-q').addEventListener('input', debounce((e) => {
@@ -586,7 +586,7 @@ async function openDeal(k) {
         <div class="fact"><small>Source</small><b>${h(sourceText(x))}</b></div>
       </div>
       <div class="sheet-actions"><button class="btn primary big" type="button" data-sheet-add="${h(k)}">${ic('plus')} Add to cart</button>
-        ${pam ? `<button class="btn big" type="button" data-sheet-pamphlet="${h(x.store_id)}">${ic('book')} View pamphlet</button>` : ''}</div>
+        ${pam ? `<button class="btn big" type="button" data-sheet-pamphlet="${pam.id}">${ic('book')} View pamphlet</button>` : ''}</div>
     </section>
     <section class="sheet-sec"><h3>Price at every shop</h3><div class="sp-list" id="sp-list"><div class="sk" style="min-height:120px"></div></div></section>`;
   dlg.showModal();
@@ -621,13 +621,21 @@ $('#sheet').addEventListener('cancel', (e) => { e.preventDefault(); closeSheet()
 $('#sheet').addEventListener('click', (e) => { if (e.target === e.currentTarget) closeSheet(); });
 
 // ------------------------------------------------------------------ pamphlets
+// Every pamphlet a shop has out now: not past its end date, or (undated) from the shop's latest fetch.
 async function loadLeaflets(force) {
   if (S.leaflets && !force) return S.leaflets;
   const d = await api('/api/leaflets');
-  const latest = {};
-  d.leaflets.forEach((l) => { if (!latest[l.store_id] && l.files.length) latest[l.store_id] = l; });
-  S.leaflets = latest;
-  S.leafletInfo = d;
+  const latest = {}, byId = {}, current = [];
+  d.leaflets.forEach((l) => { if (l.files.length && !latest[l.store_id]) latest[l.store_id] = l; });
+  d.leaflets.forEach((l) => {
+    const top = latest[l.store_id];
+    if (!l.files.length || !top) return;
+    const fresh = l.valid_until ? daysFromToday(l.valid_until) >= 0 : (Date.parse(top.fetched_at) - Date.parse(l.fetched_at)) < 8 * 864e5;
+    if (fresh || l === top) { byId[l.id] = l; current.push(l); }
+  });
+  const order = Object.fromEntries(S.meta.stores.map((s, i) => [s.id, i]));
+  current.sort((a, b) => (order[a.store_id] ?? 99) - (order[b.store_id] ?? 99) || (b.valid_from || b.fetched_at).localeCompare(a.valid_from || a.fetched_at));
+  Object.assign(S, { leaflets: latest, leafletById: byId, leafletList: current, leafletInfo: d });
   return latest;
 }
 
@@ -646,15 +654,15 @@ async function renderPamphlets() {
     $('#pm-note').innerHTML = `<div class="callout info">${ic('info')}<div>Pamphlets are saved here to read. Their prices are added to Deals automatically once Claude is connected${S.meta.local ? '.' : ' (an admin adds the key on the <a href="#/me">Me</a> page).'}</div>
       ${S.meta.local ? '<button class="btn small" type="button" data-claude>Connect Claude</button>' : ''}</div>`;
   }
-  const have = S.meta.stores.filter((s) => latest[s.id]);
+  const have = S.leafletList;
   const missing = S.meta.stores.filter((s) => !latest[s.id]);
-  $('#pm').innerHTML = have.length ? have.map((s) => {
-    const l = latest[s.id];
+  $('#pm').innerHTML = have.length ? have.map((l) => {
+    const s = S.byId[l.store_id] || { id: l.store_id, name: l.store_name };
     const cover = l.kind === 'images' ? `<img src="${h(l.files[0])}" alt="" loading="lazy" class="loading" onload="this.classList.remove('loading')">`
       : `<span class="ph">${ic('file')}</span><img alt="" class="loading" data-pdf-cover="${h(l.files[0])}">`;
     const status = l.status === 'read' ? `<span class="tag good">${ic('check')} ${plural(l.n_specials, 'price')}</span>`
       : l.status === 'error' ? `<span class="tag warn" title="${h(l.message)}">Not read</span>` : '';
-    return `<button class="pam" type="button" data-open="${h(s.id)}" aria-label="Read the ${h(s.name)} pamphlet">
+    return `<button class="pam" type="button" data-open="${l.id}" aria-label="Read the ${h(s.name)} pamphlet: ${h(l.title || '')}">
       <span class="pam-cover">${cover}<span class="pam-chip">${ic('book')} ${l.kind === 'images' ? plural(l.pages, 'page') : 'PDF'}</span><span class="pam-open">Read ${ic('arrowRight', 'sm')}</span></span>
       <span class="pam-body"><span class="row">${logo(s.id, 'sm')}${status}</span><span class="pam-title">${h(l.title || s.name + ' specials')}</span>
       <span class="pam-sub">${h(validity(l))}</span></span></button>`;
@@ -734,9 +742,10 @@ function pdfCover(url) {
 const RD = { token: 0, doc: null, kind: '', pages: [], zoom: 1, io: null, tio: null, cur: 1, rerender: null, from: null };
 const rScroll = $('#reader-scroll'), rThumbs = $('#reader-thumbs'), rDlg = $('#viewer');
 
-async function openReader(storeId, fromEl) {
-  const l = (S.leaflets || {})[storeId];
+async function openReader(id, fromEl) {
+  const l = (S.leafletById || {})[id];
   if (!l) return;
+  const storeId = l.store_id;
   const token = ++RD.token;
   Object.assign(RD, { kind: l.kind, pages: [], zoom: 1, cur: 1, from: fromEl || null });
   $('#reader-title').innerHTML = `${logo(storeId, 'sm')}<div><b>${h(l.title || storeName(storeId) + ' specials')}</b><small>${h(storeName(storeId))} · ${h(validity(l))}</small></div>

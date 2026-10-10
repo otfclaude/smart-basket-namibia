@@ -26,10 +26,13 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import date
+from urllib.parse import unquote, urljoin
 
 from . import BUNDLED_DATA, data_dir, db, importer, net
 
 MODEL = os.environ.get("NAMSHOP_CLAUDE_MODEL", "claude-opus-5-5")
+# Bumped when finding pamphlets changes enough that pamphlets should be fetched again right away
+FETCHER_VERSION = "2"   # 2: specials.na pamphlets as whole PDFs instead of their covers
 MIN_GAP = int(os.environ.get("NAMSHOP_REFRESH_MIN_GAP", "900"))  # seconds between public refreshes
 MAX_PAMPHLETS = 3          # per shop per refresh
 MAX_PAGES = 24             # images per image-pamphlet
@@ -40,6 +43,11 @@ LEAFLET_WORDS = re.compile(r"leaflet|pamphlet|catalog|brochure|flyer|special|pro
                            r"mailer|insert|week|month|page|spread", re.I)
 NOT_LEAFLET = re.compile(r"logo|icon|favicon|sprite|avatar|social|facebook|twitter|instagram|whatsapp|"
                          r"youtube|app-?store|google-?play|payment|visa|mastercard|loader|spinner|arrow", re.I)
+# PDFs a shop links to that aren't pamphlets (e.g. Model's "Birthday Ts & Cs")
+NOT_PAMPHLET = re.compile(r"terms|conditions|(?<![a-z])ts?\s*(?:&|and)\s*cs?(?![a-z])|privacy|policy|competition[\s_-]*rules|"
+                          r"entry[\s_-]*form|vacanc|careers?", re.I)
+# A pamphlet's cover or thumbnail on a listing page: the pamphlet itself is on its own page (see "files")
+COVER = re.compile(r"[?&]path=covers?(?:%2F|/)|/covers?/|thumb", re.I)
 
 SCHEMA = {
     "type": "object",
@@ -135,8 +143,10 @@ class Pamphlet:
     title: str
     page_url: str
     urls: list[str]                      # one PDF, or the page images in order
-    kind: str = "pdf"                    # pdf | images
+    kind: str = "pdf"                    # pdf | images | flipbook | auto (a PDF or an image, known on download)
     files: list[tuple[bytes, str]] = field(default_factory=list)  # (body, kind) after download
+    valid_from: str | None = None        # when the page says (used until Claude reads the pamphlet)
+    valid_until: str | None = None
 
 
 def _is_pdf(url: str) -> bool:
@@ -147,14 +157,29 @@ def _is_image(url: str) -> bool:
     return bool(re.search(r"\.(?:jpe?g|png|webp)(?:$|[?#])", url, re.I))
 
 
+def _clean_title(title: str) -> str:
+    """'Shoprite — Mid Month (valid until 18 Oct) | Specials.NA | Specials.NA' -> without the site name."""
+    return title.split(" | ")[0].strip()
+
+
+def _page_dates(text: str) -> tuple[str | None, str | None]:
+    """A pamphlet page's own dates, from its data: ..."start_date":"2026-10-05","end_date":"2026-10-18","file_url"..."""
+    m = re.search(r'start_date\W+(\d{4}-\d\d-\d\d)\W+end_date\W+(\d{4}-\d\d-\d\d)\W+file_url', text)
+    return (m.group(1), m.group(2)) if m else (None, None)
+
+
 def find_pamphlets(store_id: str, source: dict, fetch_text=net.fetch_text) -> list[Pamphlet]:
-    """Pamphlets linked from one source page (following detail links when configured)."""
+    """Pamphlets linked from one source page (following detail links when configured).
+
+    ``files`` in a source is a regex for pamphlet file links in a page's text that don't look like files,
+    e.g. specials.na's ``/api/special/<id>/download``, which returns the whole pamphlet as a PDF.
+    """
     url = source["url"]
     if source.get("type") == "pdf":
         return [Pamphlet(store_id, source.get("title", "Pamphlet"), url, [url], "pdf")]
     html, final = fetch_text(url)
     links, title = net.page_links(html, final)
-    pages = [(final, title, links)]
+    pages = [(final, title, links, html)]
     if source.get("follow"):
         follow = re.compile(source["follow"], re.I)
         detail = [ln["url"] for ln in links if follow.search(ln["url"]) and ln["url"] != final]
@@ -164,19 +189,35 @@ def find_pamphlets(store_id: str, source: dict, fetch_text=net.fetch_text) -> li
             except net.FetchError:
                 continue
             l2, t2 = net.page_links(h2, f2)
-            pages.append((f2, t2, l2))
+            pages.append((f2, t2, l2, h2))
     include = re.compile(source["match"], re.I) if source.get("match") else None
+    files = re.compile(source["files"], re.I) if source.get("files") else None
     out: list[Pamphlet] = []
     seen: set[str] = set()
     if source.get("flipbooks"):
         fb = re.compile(source["flipbooks"], re.I)
-        for page_url, page_title, page_links in pages:
+        for page_url, page_title, page_links, _ in pages:
             for ln in page_links:
                 root = _flipbook_root(ln["url"])
                 if fb.search(ln["url"]) and root not in seen:
                     seen.add(root)
                     out.append(Pamphlet(store_id, ln["text"] or page_title or "Pamphlet", page_url, [root], "flipbook"))
-    for page_url, page_title, page_links in pages:
+    # a pamphlet's own page first: it has the pamphlet's real title and dates
+    for page_url, page_title, page_links, page_html in pages[1:] + pages[:1]:
+        name = _clean_title(page_title) or "Pamphlet"
+        has_file = False
+        if files:
+            text = page_html.replace("\\/", "/").replace("\\u0026", "&")
+            vf, vu = _page_dates(text)
+            found = [urljoin(page_url, m.group(0)) for m in files.finditer(text)]
+            own = re.search(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", page_url, re.I)
+            if own and any(own.group(0).lower() in u.lower() for u in found):  # not "related pamphlets"
+                found = [u for u in found if own.group(0).lower() in u.lower()]
+            for u in found:
+                if u not in seen:
+                    seen.add(u)
+                    has_file = True
+                    out.append(Pamphlet(store_id, name, page_url, [u], "auto", valid_from=vf, valid_until=vu))
         images = []
         for ln in page_links:
             u, ctx = ln["url"], f'{ln["url"]} {ln["text"]}'
@@ -185,14 +226,18 @@ def find_pamphlets(store_id: str, source: dict, fetch_text=net.fetch_text) -> li
             if include is not None and not include.search(ctx):
                 continue
             if _is_pdf(u):
+                # skip the same pamphlet's other copies when the page gave its download link
+                if NOT_PAMPHLET.search(unquote(ctx)) or (files and has_file):
+                    continue
                 seen.add(u)
-                out.append(Pamphlet(store_id, ln["text"] or page_title or "Pamphlet", page_url, [u], "pdf"))
-            elif _is_image(u) and ln["tag"] in ("img", "a", "text", "meta") and (
+                has_file = True
+                out.append(Pamphlet(store_id, _clean_title(ln["text"]) or name, page_url, [u], "pdf"))
+            elif _is_image(u) and not COVER.search(u) and ln["tag"] in ("img", "a", "text", "meta") and (
                     include is not None or LEAFLET_WORDS.search(ctx)):
                 seen.add(u)
                 images.append(u)
-        if images:
-            out.append(Pamphlet(store_id, page_title or "Pamphlet", page_url, images[:MAX_PAGES], "images"))
+        if images and not has_file:  # a page with the pamphlet as a file: its images are covers and banners
+            out.append(Pamphlet(store_id, name, page_url, images[:MAX_PAGES], "images"))
     return out[: source.get("max", MAX_PAMPHLETS)]
 
 
@@ -260,6 +305,20 @@ def resolve_flipbook(root: str, fetch=net.fetch, fetch_text=net.fetch_text) -> l
 
 
 def download(p: Pamphlet, fetch=net.fetch, fetch_text=net.fetch_text) -> Pamphlet:
+    if p.kind == "auto":  # a download link: whatever it returns, a PDF or a page image
+        for u in p.urls:
+            try:
+                body, _, _ = fetch(u)
+            except net.FetchError:
+                continue
+            kind = net.file_kind(body)
+            if kind == "pdf":
+                p.kind, p.files = "pdf", [(body, kind)]
+                return p
+            if kind in ("png", "jpeg", "webp", "gif") and len(body) >= MIN_IMAGE_BYTES:
+                p.files.append((body, kind))
+        p.kind = "images" if p.files else "pdf"
+        return p
     if p.kind == "flipbook":
         p.files = resolve_flipbook(p.urls[0], fetch, fetch_text)
         p.kind = "pdf" if p.files and p.files[0][1] == "pdf" else "images"
@@ -400,7 +459,9 @@ def leaflet_path(store_id: str, name: str):
 
 
 def list_leaflets(conn, limit: int = 60) -> list[dict]:
+    # Older versions saved specials.na listing covers as one-page "pamphlets": those stay hidden
     rows = conn.execute("SELECT l.*, s.name AS store_name FROM leaflets l JOIN stores s ON s.id = l.store_id "
+                        "WHERE NOT (l.kind = 'images' AND (l.source_url LIKE '%path=covers%' OR l.source_url LIKE '%/covers/%')) "
                         "ORDER BY l.fetched_at DESC LIMIT ?", (limit,)).fetchall()
     out = []
     for r in rows:
@@ -438,18 +499,22 @@ def refresh_store(conn, store_id: str, shop_name: str, srcs: list[dict], categor
     report("downloading", f"Downloading {len(found)} pamphlet{'s' if len(found) > 1 else ''}…")
     new, specials = 0, 0
     messages = []
+    done: set[str] = set()
     for p in found[:MAX_PAMPHLETS]:
         download(p, fetch, fetch_text)
         if not p.files:
             continue
         sha = fingerprint(p)
+        if sha in done:  # the same pamphlet linked twice (e.g. its PDF and its download link)
+            continue
+        done.add(sha)
         known = conn.execute("SELECT id, status FROM leaflets WHERE store_id = ? AND sha256 = ?",
                              (store_id, sha)).fetchone()
         if known and known["status"] in ("read", "stored"):
             if known["status"] == "read" or not (reader or claude_configured()):
                 continue
         names = _store_files(p, sha)
-        status, message, n, vf, vu, title = "stored", "", 0, None, None, p.title
+        status, message, n, vf, vu, title = "stored", "", 0, p.valid_from, p.valid_until, p.title
         if reader or claude_configured():
             report("reading", f"Reading prices with Claude ({len(p.files)} file{'s' if len(p.files) > 1 else ''})…")
             try:
@@ -458,7 +523,7 @@ def refresh_store(conn, store_id: str, shop_name: str, srcs: list[dict], categor
                 res = importer.import_rows(conn, rows, source=f"leaflet:{store_id}", default_store=store_id)
                 n = res["imported"]
                 status, message = "read", f"{n} prices read"
-                vf, vu = _iso(data.get("valid_from")), _iso(data.get("valid_until"))
+                vf, vu = _iso(data.get("valid_from")) or vf, _iso(data.get("valid_until")) or vu
                 title = (data.get("title") or title)[:120]
             except ReadError as e:
                 status, message = "error", str(e)

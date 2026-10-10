@@ -139,9 +139,14 @@ def create_app(db_file: str | Path | None = None, refresh_hours: float | None = 
                     c = db.connect(db_file)
                     try:
                         last = json.loads(db.get_setting(c, "last_refresh", "{}") or "{}").get("at", "")
+                        # an update that finds pamphlets better fetches them again at once
+                        newer = db.get_setting(c, "leaflet_fetcher", "") != leaflets.FETCHER_VERSION
+                        if newer:
+                            db.set_setting(c, "leaflet_fetcher", leaflets.FETCHER_VERSION)
+                            c.commit()
                     finally:
                         c.close()
-                    if not last or time.time() - _ts(last) >= hours * 3600:
+                    if not last or newer or time.time() - _ts(last) >= hours * 3600:
                         refresher.start(force=True)
                     await asyncio.sleep(min(600, hours * 3600))
             task = asyncio.create_task(loop())
