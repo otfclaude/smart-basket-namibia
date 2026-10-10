@@ -621,17 +621,16 @@ $('#sheet').addEventListener('cancel', (e) => { e.preventDefault(); closeSheet()
 $('#sheet').addEventListener('click', (e) => { if (e.target === e.currentTarget) closeSheet(); });
 
 // ------------------------------------------------------------------ pamphlets
-// Every pamphlet a shop has out now: not past its end date, or (undated) from the shop's latest fetch.
+// Every pamphlet a shop has out now.
 async function loadLeaflets(force) {
   if (S.leaflets && !force) return S.leaflets;
   const d = await api('/api/leaflets');
   const latest = {}, byId = {}, current = [];
-  d.leaflets.forEach((l) => { if (l.files.length && !latest[l.store_id]) latest[l.store_id] = l; });
-  d.leaflets.forEach((l) => {
-    const top = latest[l.store_id];
-    if (!l.files.length || !top) return;
-    const fresh = l.valid_until ? daysFromToday(l.valid_until) >= 0 : (Date.parse(top.fetched_at) - Date.parse(l.fetched_at)) < 8 * 864e5;
-    if (fresh || l === top) { byId[l.id] = l; current.push(l); }
+  d.leaflets.forEach((l) => {   // the server marks the ones a shop still offers
+    if (!l.files.length || l.current === false) return;
+    if (!latest[l.store_id]) latest[l.store_id] = l;
+    byId[l.id] = l;
+    current.push(l);
   });
   const order = Object.fromEntries(S.meta.stores.map((s, i) => [s.id, i]));
   current.sort((a, b) => (order[a.store_id] ?? 99) - (order[b.store_id] ?? 99) || (b.valid_from || b.fetched_at).localeCompare(a.valid_from || a.fetched_at));

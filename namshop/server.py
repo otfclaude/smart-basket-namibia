@@ -141,8 +141,9 @@ def create_app(db_file: str | Path | None = None, refresh_hours: float | None = 
                         last = json.loads(db.get_setting(c, "last_refresh", "{}") or "{}").get("at", "")
                         # an update that finds pamphlets better fetches them again at once
                         newer = db.get_setting(c, "leaflet_fetcher", "") != leaflets.FETCHER_VERSION
-                        if newer:
+                        if newer:  # pamphlets not found again by the new fetcher stop showing
                             db.set_setting(c, "leaflet_fetcher", leaflets.FETCHER_VERSION)
+                            db.set_setting(c, "leaflets_since", db.stamp())
                             c.commit()
                     finally:
                         c.close()

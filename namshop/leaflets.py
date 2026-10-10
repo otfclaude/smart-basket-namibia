@@ -25,14 +25,14 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime, timedelta
 from urllib.parse import unquote, urljoin
 
 from . import BUNDLED_DATA, data_dir, db, importer, net
 
 MODEL = os.environ.get("NAMSHOP_CLAUDE_MODEL", "claude-opus-5-5")
 # Bumped when finding pamphlets changes enough that pamphlets should be fetched again right away
-FETCHER_VERSION = "2"   # 2: specials.na pamphlets as whole PDFs instead of their covers
+FETCHER_VERSION = "3"   # 3: specials.na pamphlets as whole PDFs, not their covers; one image per page
 MIN_GAP = int(os.environ.get("NAMSHOP_REFRESH_MIN_GAP", "900"))  # seconds between public refreshes
 MAX_PAMPHLETS = 3          # per shop per refresh
 MAX_PAGES = 24             # images per image-pamphlet
@@ -168,6 +168,26 @@ def _page_dates(text: str) -> tuple[str | None, str | None]:
     return (m.group(1), m.group(2)) if m else (None, None)
 
 
+_SIZE = re.compile(r"-(\d{2,4})x(\d{2,4})(?=\.(?:jpe?g|png|webp)(?:$|[?#]))", re.I)
+
+
+def _page_images(urls: list[str]) -> list[str]:
+    """One image per page: the largest of WordPress-style size variants (Page-1-752x1024.jpg,
+    Page-1-220x300.jpg, Page-1.jpg), in page order when the files are numbered."""
+    best: dict[str, tuple[int, str, int]] = {}
+    for i, u in enumerate(urls):
+        m = _SIZE.search(u)
+        key = _SIZE.sub("", u)
+        area = int(m.group(1)) * int(m.group(2)) if m else 10 ** 9   # no size in the name: the original
+        first = best[key][2] if key in best else i
+        if key not in best or area > best[key][0]:
+            best[key] = (area, u, first)
+    keys = sorted(best, key=lambda k: best[k][2])
+    if len({re.sub(r"\d+", "#", k) for k in keys}) == 1:   # Page-1, Page-2, ...: number order
+        keys.sort(key=lambda k: [int(t) if t.isdigit() else t for t in re.split(r"(\d+)", k)])
+    return [best[k][1] for k in keys]
+
+
 def find_pamphlets(store_id: str, source: dict, fetch_text=net.fetch_text) -> list[Pamphlet]:
     """Pamphlets linked from one source page (following detail links when configured).
 
@@ -237,7 +257,7 @@ def find_pamphlets(store_id: str, source: dict, fetch_text=net.fetch_text) -> li
                 seen.add(u)
                 images.append(u)
         if images and not has_file:  # a page with the pamphlet as a file: its images are covers and banners
-            out.append(Pamphlet(store_id, name, page_url, images[:MAX_PAGES], "images"))
+            out.append(Pamphlet(store_id, name, page_url, _page_images(images)[:MAX_PAGES], "images"))
     return out[: source.get("max", MAX_PAMPHLETS)]
 
 
@@ -458,19 +478,32 @@ def leaflet_path(store_id: str, name: str):
     return p if root in p.parents and p.is_file() else None
 
 
+SEEN_WINDOW = timedelta(hours=36)   # a pamphlet a shop stops offering drops out after this
+
+
 def list_leaflets(conn, limit: int = 60) -> list[dict]:
+    """Newest first. ``current``: still on offer, i.e. not past its end date and seen in the shop's
+    latest refreshes (since the last fetcher update, once the shop has been refreshed since then)."""
     # Older versions saved specials.na listing covers as one-page "pamphlets": those stay hidden
     rows = conn.execute("SELECT l.*, s.name AS store_name FROM leaflets l JOIN stores s ON s.id = l.store_id "
                         "WHERE NOT (l.kind = 'images' AND (l.source_url LIKE '%path=covers%' OR l.source_url LIKE '%/covers/%')) "
                         "ORDER BY l.fetched_at DESC LIMIT ?", (limit,)).fetchall()
+    since = db.get_setting(conn, "leaflets_since", "") or ""
+    today = db.today().isoformat()
+    newest: dict[str, str] = {}
     out = []
     for r in rows:
+        top = newest.setdefault(r["store_id"], r["fetched_at"])
+        current = (not r["valid_until"] or r["valid_until"] >= today) and \
+            datetime.fromisoformat(r["fetched_at"]) >= datetime.fromisoformat(top) - SEEN_WINDOW and \
+            (not since or top < since or r["fetched_at"] >= since)
         files = json.loads(r["files"])
         out.append({"id": r["id"], "store_id": r["store_id"], "store_name": r["store_name"], "title": r["title"],
                     "page_url": r["page_url"], "kind": r["kind"], "pages": len(files),
                     "files": [f"/leaflets/{r['store_id']}/{f}" for f in files],
                     "fetched_at": r["fetched_at"], "valid_from": r["valid_from"], "valid_until": r["valid_until"],
-                    "status": r["status"], "message": r["message"], "n_specials": r["n_specials"]})
+                    "status": r["status"], "message": r["message"], "n_specials": r["n_specials"],
+                    "current": bool(current)})
     return out
 
 
@@ -512,6 +545,9 @@ def refresh_store(conn, store_id: str, shop_name: str, srcs: list[dict], categor
                              (store_id, sha)).fetchone()
         if known and known["status"] in ("read", "stored"):
             if known["status"] == "read" or not (reader or claude_configured()):
+                # still on offer: fetched_at doubles as "last seen", which keeps it current
+                conn.execute("UPDATE leaflets SET fetched_at = ? WHERE id = ?", (db.stamp(), known["id"]))
+                conn.commit()
                 continue
         names = _store_files(p, sha)
         status, message, n, vf, vu, title = "stored", "", 0, p.valid_from, p.valid_until, p.title

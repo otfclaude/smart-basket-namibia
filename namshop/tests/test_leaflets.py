@@ -278,3 +278,33 @@ def test_old_cover_only_pamphlets_are_hidden(conn):
                  (f"https://specials.na/api/file-proxy?path=covers%2F{SNA_ID}.webp", db.stamp()))
     conn.commit()
     assert leaflets.list_leaflets(conn) == []
+
+
+def test_page_images_keep_one_size_per_page_in_page_order():
+    base = "https://www.weckevoigtsspar.com/wp-content/uploads/2025/12/"
+    urls = [base + f"Page-{n}-752x1024.jpg" for n in (8, 9, 10)] + [base + f"Page-{n}-220x300.jpg" for n in (1, 2, 8)] + \
+           [base + "Page-1.jpg", base + "Page-2-752x1024.jpg"]
+    assert leaflets._page_images(urls) == [base + "Page-1.jpg", base + "Page-2-752x1024.jpg",
+                                           base + "Page-8-752x1024.jpg", base + "Page-9-752x1024.jpg",
+                                           base + "Page-10-752x1024.jpg"]
+    # files that aren't a numbered series keep the order the page shows them in
+    assert leaflets._page_images(["https://x.na/b-cover.jpg", "https://x.na/a-back.jpg"]) == \
+        ["https://x.na/b-cover.jpg", "https://x.na/a-back.jpg"]
+
+
+def test_only_pamphlets_a_shop_still_offers_are_current(conn):
+    def add(sha, fetched, until=None, kind="pdf"):
+        conn.execute("INSERT INTO leaflets(store_id, title, source_url, page_url, kind, files, sha256, fetched_at, "
+                     "valid_until, status) VALUES('spar', ?, 'https://x.na/a.pdf', '', ?, '[\"a.pdf\"]', ?, ?, ?, 'stored')",
+                     (sha, kind, sha, fetched, until))
+    now = db.now()
+    add("seen-now", now.isoformat(timespec="seconds"))
+    add("seen-yesterday", (now - __import__("datetime").timedelta(hours=20)).isoformat(timespec="seconds"))
+    add("gone", (now - __import__("datetime").timedelta(days=3)).isoformat(timespec="seconds"))
+    add("expired", now.isoformat(timespec="seconds"), until="2000-01-01")
+    conn.commit()
+    cur = lambda: sorted(l["title"] for l in leaflets.list_leaflets(conn) if l["current"])
+    assert cur() == ["seen-now", "seen-yesterday"]
+    # after a fetcher update, once the shop has been refreshed only what was found again counts
+    db.set_setting(conn, "leaflets_since", (now - __import__("datetime").timedelta(hours=1)).isoformat(timespec="seconds"))
+    assert cur() == ["seen-now"]
