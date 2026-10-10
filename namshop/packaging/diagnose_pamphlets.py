@@ -2,6 +2,7 @@
 
     python namshop/packaging/diagnose_pamphlets.py report        # what each source offers, and what was stored
     python namshop/packaging/diagnose_pamphlets.py seed DATA_DIR # a database with one known 4-page PDF pamphlet
+    python namshop/packaging/diagnose_pamphlets.py probe URL...  # how a page links to its pamphlet files
 
 ``report`` reads NAMSHOP_DATA like the app does. It never sends anything to Claude.
 """
@@ -96,7 +97,39 @@ def seed(data_dir: str):
     print("seeded a 4-page PDF pamphlet in", data_dir)
 
 
+def probe(urls: list[str], depth: int = 1):
+    """Print every file-like URL a page mentions (and the same for its first linked detail pages)."""
+    from namshop import net
+    interesting = re.compile(r"""[^"'\s<>()]*(?:\.pdf|file-proxy|supabase|/uploads/|/pages?/|/api/)[^"'\s<>()]{0,160}""", re.I)
+    for url in urls:
+        try:
+            html, final = net.fetch_text(url)
+        except net.FetchError as e:
+            print(f"\n## {url}\n   unreachable: {e}")
+            continue
+        links, title = net.page_links(html, final)
+        print(f"\n## {final}  ({len(html)} chars)  {title!r}")
+        for ln in links:
+            if re.search(r"\.pdf|file-proxy|supabase|\.(?:jpe?g|png|webp)", ln["url"], re.I):
+                print(f"   {ln['tag']:5} {ln['url'][:220]}  {ln['text'][:60]!r}")
+        seen = set()
+        for m in interesting.finditer(html.replace("\\/", "/").replace("\\u0026", "&")):
+            t = m.group(0)
+            if t not in seen and len(seen) < 60:
+                seen.add(t)
+                print(f"   text  {t[:220]}")
+        for key in ("pdf", "pages", "page_count", "images", "file"):
+            for m in list(re.finditer(rf'.{{0,80}}\\?"{key}[a-zA-Z_]*\\?"\s*:.{{0,160}}', html))[:4]:
+                print(f"   json  {m.group(0)[:260]!r}")
+        if depth:
+            detail = [ln["url"] for ln in links if re.search(r"/special/|/specials?/[^/]+$|leaflet|catalog", ln["url"], re.I) and ln["url"] != final]
+            probe(list(dict.fromkeys(detail))[:2], depth - 1)
+
+
 if __name__ == "__main__":
+    if sys.argv[1:2] == ["probe"]:
+        probe(sys.argv[2:])
+        sys.exit(0)
     if sys.argv[1:2] == ["report"]:
         report()
     elif sys.argv[1:2] == ["seed"] and len(sys.argv) == 3:

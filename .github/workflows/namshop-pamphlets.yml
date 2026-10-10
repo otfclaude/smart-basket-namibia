@@ -6,12 +6,32 @@ name: Smart Basket pamphlet check
 # many pages it shows. A known 4-page test PDF must show all 4 pages.
 on:
   workflow_dispatch:
+    inputs:
+      probe:
+        description: "Only show how these pages (space-separated URLs) link to their pamphlet files"
+        required: false
+        default: ""
 
 permissions:
   contents: read
 
 jobs:
+  probe:
+    if: inputs.probe != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: How each page links to its pamphlet files
+        env:
+          URLS: ${{ inputs.probe }}
+        run: python namshop/packaging/diagnose_pamphlets.py probe $URLS
+
   check:
+    if: inputs.probe == ''
     runs-on: macos-15
     timeout-minutes: 40
     env:
