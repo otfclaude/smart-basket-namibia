@@ -54,19 +54,20 @@ To build it yourself on a Mac:
 
 | Page | What you can do |
 |---|---|
-| 🔥 **Deals** | Every special running today. You get live counters, floating "hottest deal" cards, an auto-scrolling carousel of the biggest price drops, and shop logos you tap to filter. The grid loads more as you scroll. Tap **＋ Add** and the item flies into your cart. |
-| ⚡ **One-tap baskets** | Month-end stock-up, Braai weekend, Breakfast basics, Baby essentials, Cleaning day and Student survival, each showing what it costs today. One tap builds the cart. |
-| 📰 **Pamphlets** | Each shop's latest pamphlet with its cover, dates and how many prices were read from it. Open it to flip through the pages or the PDF. |
-| 🔄 **Refresh** | The yellow button fetches the newest pamphlet from every shop. A progress panel shows each shop's logo moving through searching → downloading → reading with Claude → done. New prices go straight into Deals, Compare and the cart. |
-| 🔎 **Compare** | Any product's price at every shop, cheapest first, with unit prices and specials. |
-| 🛒 **Cart → Cheapest** | Add by search, quick basket, or by pasting a list (`2 x bread`, `maize meal 10kg`, `18 eggs`…). Pick any brand or a specific one. The total updates live as you change things. Under **⚙️ Shops & travel** you choose your shops, how many you'll visit, and a taxi/fuel cost per shop. |
-| 💰 **Cart → Fit my budget** | Drag the budget slider and watch the gauge and cart update. Mark items ⭐ Must have, High, Medium or Nice to have; must-haves always go in and the rest fill the budget in order. You also see what didn't fit and roughly how much more it would cost. |
-| 👤 **Me** | Sign up or sign in, saved lists, my shops, profile and password, **📣 Share a special** spotted in store, and admin tools for admins. |
+| **Deals** | Every special running today: the biggest price drops, shop and category filters, and a grid that loads more as you scroll. Search with <kbd>/</kbd>. Tap a deal for its details, its price at every other shop and a link to the pamphlet it came from, without leaving the app. Tap **+** to add it to your cart. |
+| **Ready-made baskets** | Month-end stock-up, Braai weekend, Breakfast basics, Baby essentials, Cleaning day and Student survival, each showing what it costs today. One tap builds the cart. |
+| **Pamphlets** | Each shop's latest pamphlet with its cover, dates and how many prices were read from it. Open one to read it inside the app: scroll through the pages, zoom (buttons, pinch, or Cmd + scroll), drag to move around, jump with the page thumbnails or the arrow keys. PDF pamphlets are drawn by the bundled [pdf.js](https://mozilla.github.io/pdf.js/) (Apache-2.0). |
+| **Refresh** | Fetches the newest pamphlet from every shop. A progress panel shows each shop moving through searching → downloading → reading with Claude → done. New prices go straight into Deals, Compare and the cart. |
+| **Compare** | Any product's price at every shop, cheapest first, with unit prices, specials and how far each price is from the cheapest. |
+| **Cart → Cheapest** | Add by search, quick basket, or by pasting a list (`2 x bread`, `maize meal 10kg`, `18 eggs`…). Pick any brand or a specific one. The total updates live as you change things. Under **Shops & travel** you choose your shops, how many you'll visit, and a taxi/fuel cost per shop. |
+| **Cart → Fit my budget** | Drag the budget slider and watch the gauge and cart update. Mark items Must have, High, Medium or Nice to have; must-haves always go in and the rest fill the budget in order. You also see what didn't fit and roughly how much more it would cost. |
+| **Me** | Sign up or sign in, saved lists, my shops, profile and password, **Share a special** spotted in store, and admin tools for admins. |
 
 Plans can be sent to WhatsApp, copied or printed as a tick-off list. The interface uses
-[Motion](https://motion.dev) (bundled, MIT) for its animations: staggered card entrances, counters
-that count up, spring transitions, fly-to-cart, confetti on wins and view transitions between
-pages. It respects the system "reduce motion" setting and works in light and dark mode.
+[Motion](https://motion.dev) (bundled, MIT) for its animations: a sliding tab indicator, spring
+panels, cards that settle into place, counters that count up, the cover that opens into the reader
+and view transitions between pages. Rows that scroll sideways have arrows and can be dragged with
+the mouse. It respects the system "reduce motion" setting and works in light and dark mode.
 
 ## Where prices come from
 

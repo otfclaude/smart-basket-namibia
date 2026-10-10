@@ -181,8 +181,11 @@ def selftest() -> int:
         assert json.loads(check("/healthz", "json"))["app"] == "smart-basket"
         check("/", "html", b"Smart Basket")
         check("/static/app.js", "javascript", b"renderDeals")
-        check("/static/app.css", "css", b".hero")
+        check("/static/app.css", "css", b".deal")
         check("/static/vendor/motion-13.4.0.min.js", "javascript", b"Motion")
+        # the pamphlet reader imports pdf.js as ES modules, which only run when served as JavaScript
+        check("/static/vendor/pdfjs-6.3.289/pdf.min.mjs", "javascript", b"getDocument")
+        check("/static/vendor/pdfjs-6.3.289/pdf.worker.min.mjs", "javascript", b"WorkerMessageHandler")
         check("/logos/shoprite.svg", "svg", b"<svg")
         meta = json.loads(check("/api/meta", "json"))
         assert len(meta["stores"]) >= 10 and meta["local"] is True, "meta"
@@ -272,7 +275,7 @@ def run(data: Path):
             pass
         return
     webview.create_window(APP_NAME, url, width=1320, height=880, min_size=(380, 560),
-                          background_color="#F4F6FB", text_select=True)
+                          background_color="#F6F6F4", text_select=True)
     # private_mode=False keeps the cart and sign-in between launches. On macOS WebKit keeps them in
     # ~/Library/WebKit/<bundle id> (storage_path is used by the other platforms' backends).
     webview.start(private_mode=False, storage_path=str(data / "webview"))

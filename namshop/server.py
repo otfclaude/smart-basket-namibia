@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import mimetypes
 import os
 import sqlite3
 import time
@@ -19,6 +20,9 @@ from pydantic import BaseModel, Field
 from . import BUNDLED_DATA, STATIC_DIR, __version__, auth, db, deals, importer, leaflets, logos, optimizer, sample
 
 COOKIE = "nsb_session"
+# the pamphlet reader loads pdf.js as ES modules, which browsers only run when served as JavaScript
+mimetypes.add_type("text/javascript", ".mjs")
+mimetypes.add_type("application/wasm", ".wasm")
 
 
 # ---------------------------------------------------------------- request bodies
@@ -457,9 +461,13 @@ def create_app(db_file: str | Path | None = None, refresh_hours: float | None = 
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
+    # app.js/app.css URLs carry a hash of their contents, so the window never runs a stale copy after an update
+    asset_v = format(zlib.crc32(b"".join((STATIC_DIR / f).read_bytes() for f in ("app.js", "app.css"))), "08x")
+    index_html = (STATIC_DIR / "index.html").read_text(encoding="utf-8").replace("__ASSET_V__", asset_v)
+
     @app.get("/", response_class=HTMLResponse)
     def index():
-        return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"})
+        return HTMLResponse(index_html, headers={"Cache-Control": "no-cache"})
 
     @app.get("/healthz")
     def health():
