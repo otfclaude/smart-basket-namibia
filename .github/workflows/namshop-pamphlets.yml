@@ -1,0 +1,48 @@
+name: Smart Basket pamphlet check
+
+# Run by hand from the Actions tab. Fetches this week's pamphlets from every shop the way the app's
+# Refresh button does (no Claude key, so nothing is read or imported), reports how many pages each
+# one has, then opens every pamphlet in the app's reader in WebKit (Safari's engine) and reports how
+# many pages it shows. A known 4-page test PDF must show all 4 pages.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: macos-15
+    timeout-minutes: 40
+    env:
+      NAMSHOP_REFRESH_HOURS: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          python -m pip install -r namshop/requirements.txt pypdf
+          npm install --no-save --no-package-lock playwright@1.63.0
+          npx playwright install webkit
+      - name: Fetch this week's pamphlets
+        env:
+          NAMSHOP_DATA: ${{ runner.temp }}/live
+        run: python -m namshop refresh
+      - name: What each shop offers and what was stored
+        env:
+          NAMSHOP_DATA: ${{ runner.temp }}/live
+        run: python namshop/packaging/diagnose_pamphlets.py report
+      - name: The reader shows every page of a known 4-page PDF (WebKit)
+        run: |
+          python namshop/packaging/diagnose_pamphlets.py seed "$RUNNER_TEMP/test"
+          NAMSHOP_DATA="$RUNNER_TEMP/test" python -m namshop serve --port 8766 > test-server.log 2>&1 &
+          for i in $(seq 1 30); do curl -fs http://127.0.0.1:8766/healthz >/dev/null && break; sleep 1; done
+          node namshop/packaging/reader_check.js http://127.0.0.1:8766/ 4
+      - name: Open this week's real pamphlets in the reader (WebKit)
+        if: always()
+        run: |
+          NAMSHOP_DATA="$RUNNER_TEMP/live" python -m namshop serve --port 8765 > live-server.log 2>&1 &
+          for i in $(seq 1 30); do curl -fs http://127.0.0.1:8765/healthz >/dev/null && break; sleep 1; done
+          node namshop/packaging/reader_check.js http://127.0.0.1:8765/
